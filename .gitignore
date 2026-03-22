@@ -1,7 +1,12 @@
 node_modules/
 dist/
-data/*.db
+data/
 .env
+.env.local
+.env.production
 *.log
 .DS_Store
 worktrees/
+*.pem
+*.key
+*.p12
