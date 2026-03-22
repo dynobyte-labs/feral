@@ -243,7 +243,12 @@ export class SlackBot {
         const project = this.projectManager.getByName(projectName);
         if (!project) return `:x: Project "${projectName}" not found`;
         const worker = this.workerManager.getForProject(project.id);
-        if (!worker) return `:warning: No active worker for ${projectName}`;
+        if (!worker) {
+          // Check if already paused
+          const stoppable = this.workerManager.getStoppableWorkerForProject(project.id);
+          if (stoppable?.status === "paused") return `:pause_button: *${projectName}* is already paused. Use \`!resume\` to start it back up.`;
+          return `:warning: No active worker for ${projectName}`;
+        }
         await this.workerManager.pause(worker.id);
         return `:pause_button: *${projectName}* paused. Just say "resume" when you're ready.`;
       }
@@ -261,8 +266,8 @@ export class SlackBot {
         const projectName = params.project as string;
         const project = this.projectManager.getByName(projectName);
         if (!project) return `:x: Project "${projectName}" not found`;
-        const worker = this.workerManager.getForProject(project.id);
-        if (!worker) return `:warning: No active worker for ${projectName}`;
+        const worker = this.workerManager.getStoppableWorkerForProject(project.id);
+        if (!worker) return `:warning: No active or paused worker for ${projectName}`;
         await this.workerManager.stop(worker.id);
         return `:stop_button: *${projectName}* stopped.`;
       }
@@ -311,20 +316,20 @@ export class SlackBot {
             ":page_facing_up: *View logs* — _\"show me the logs for my-app\"_",
             ":stop_button: *Stop workers* — _\"stop my-app\"_",
             "",
-            "_You can also use `!commands` if you prefer: `!new`, `!start`, `!status`, `!pause`, `!resume`, `!stop`, `!tell`, `!logs`, `!cleanup`_",
+            "_You can also use `!commands`: `!new myapp`, `!start myapp`, `!status`, `!pause myapp`, `!resume myapp`, `!stop myapp`, `!logs myapp`_",
           ].join("\n");
         }
         return [
           ":book: *Feral Commands*",
           "",
-          "`!new <name> [template] [description]` — Create a new project",
-          "`!start <project> <branch> <prompt>` — Start a worker",
+          "`!new <name> [description]` — Create a new project",
+          "`!start <name> [prompt]` — Start a worker (defaults to main branch)",
           "`!status` — Overview of all projects",
-          "`!pause <project>` — Pause a running worker",
-          "`!resume <project> [instructions]` — Resume a paused project",
-          "`!stop <project>` — Stop a worker permanently",
-          "`!tell <project> <message>` — Send a message to a worker",
-          "`!logs <project> [lines]` — View worker output",
+          "`!pause <name>` — Pause a running worker",
+          "`!resume <name> [instructions]` — Resume a paused project",
+          "`!stop <name>` — Stop a worker permanently",
+          "`!tell <name> <message>` — Send a message to a running worker",
+          "`!logs <name> [lines]` — View worker output",
           "`!cleanup` — Clean up worktrees",
           "",
           "_Set ANTHROPIC_API_KEY to enable natural language mode!_",
@@ -343,84 +348,72 @@ export class SlackBot {
   private registerLegacyCommands(): void {
     if (!this.app) return;
 
-    this.app.message(/^!new\s+(\S+)\s*(\S+)?\s*(.*)$/i, async ({ say, context }) => {
-      const [, name, template, description] = context.matches!;
-      try {
-        await say(`:hammer_and_wrench: Creating project *${name}*...`);
-        const result = await this.executeAction("create_project", {
-          name, template: template || "empty", description: description || "",
-        });
-        await say(result);
-      } catch (err) {
-        await say(`:x: Failed to create project: ${err}`);
-      }
+    // !new <name> [description]  — template always defaults to empty
+    this.app.message(/^!new\s+(\S+)\s*(.*)$/i, async ({ say, context }) => {
+      const [, name, description] = context.matches!;
+      await say(`:hammer_and_wrench: Creating project *${name}*...`);
+      this.executeAction("create_project", {
+        name, template: "empty", description: description?.trim() || "",
+      }).then(result => say(result)).catch(err => say(`:x: ${err}`));
     });
 
-    this.app.message(/^!start\s+(\S+)\s+(\S+)\s+(.+)$/is, async ({ say, context }) => {
-      const [, projectName, branch, prompt] = context.matches!;
-      try {
-        await say(`:rocket: Starting worker for *${projectName}*...`);
-        const result = await this.executeAction("start_worker", {
-          project: projectName, branch, prompt,
-        });
-        await say(result);
-      } catch (err) {
-        await say(`:x: ${err}`);
-      }
+    // !start [project] [prompt]  — project auto-detected from channel if omitted
+    this.app.message(/^!start(?:\s+(\S+))?\s*(.*)$/is, async ({ say, message, context }) => {
+      const [, nameArg, prompt] = context.matches!;
+      const projectName = nameArg?.trim() || this.projectNameFromChannel(message.channel);
+      if (!projectName) { await say(`:x: Specify a project name or run this from a project channel.`); return; }
+      await say(`:rocket: Starting worker for *${projectName}*... (this takes ~15s)`);
+      this.executeAction("start_worker", {
+        project: projectName,
+        branch: "main",
+        prompt: prompt?.trim() || "Check the PROJECT_BRIEF.md and start working.",
+      }).then(result => say(result)).catch(err => say(`:x: ${err}`));
     });
 
     this.app.message(/^!status$/i, async ({ say }) => {
-      try {
-        const result = await this.executeAction("get_status", {});
-        await say(result);
-      } catch (err) {
-        await say(`:x: ${err}`);
-      }
+      this.executeAction("get_status", {})
+        .then(result => say(result)).catch(err => say(`:x: ${err}`));
     });
 
-    this.app.message(/^!pause\s+(\S+)$/i, async ({ say, context }) => {
-      const [, projectName] = context.matches!;
-      try {
-        const result = await this.executeAction("pause_worker", { project: projectName });
-        await say(result);
-      } catch (err) {
-        await say(`:x: ${err}`);
-      }
+    // !pause [project]
+    this.app.message(/^!pause(?:\s+(\S+))?$/i, async ({ say, message, context }) => {
+      const [, nameArg] = context.matches!;
+      const projectName = nameArg?.trim() || this.projectNameFromChannel(message.channel);
+      if (!projectName) { await say(`:x: Specify a project name or run this from a project channel.`); return; }
+      await say(`:hourglass: Pausing *${projectName}*...`);
+      this.executeAction("pause_worker", { project: projectName })
+        .then(result => say(result)).catch(err => say(`:x: ${err}`));
     });
 
-    this.app.message(/^!resume\s+(\S+)\s*(.*)$/is, async ({ say, context }) => {
-      const [, projectName, instructions] = context.matches!;
-      try {
-        await say(`:arrow_forward: Resuming *${projectName}*...`);
-        const result = await this.executeAction("resume_worker", {
-          project: projectName, instructions: instructions || undefined,
-        });
-        await say(result);
-      } catch (err) {
-        await say(`:x: ${err}`);
-      }
+    // !resume [project] [instructions]
+    this.app.message(/^!resume(?:\s+(\S+))?\s*(.*)$/is, async ({ say, message, context }) => {
+      const [, nameArg, instructions] = context.matches!;
+      const projectName = nameArg?.trim() || this.projectNameFromChannel(message.channel);
+      if (!projectName) { await say(`:x: Specify a project name or run this from a project channel.`); return; }
+      await say(`:arrow_forward: Resuming *${projectName}*... (this takes ~15s)`);
+      this.executeAction("resume_worker", {
+        project: projectName, instructions: instructions?.trim() || undefined,
+      }).then(result => say(result)).catch(err => say(`:x: ${err}`));
     });
 
-    this.app.message(/^!stop\s+(\S+)$/i, async ({ say, context }) => {
-      const [, projectName] = context.matches!;
-      try {
-        const result = await this.executeAction("stop_worker", { project: projectName });
-        await say(result);
-      } catch (err) {
-        await say(`:x: ${err}`);
-      }
+    // !stop [project]
+    this.app.message(/^!stop(?:\s+(\S+))?$/i, async ({ say, message, context }) => {
+      const [, nameArg] = context.matches!;
+      const projectName = nameArg?.trim() || this.projectNameFromChannel(message.channel);
+      if (!projectName) { await say(`:x: Specify a project name or run this from a project channel.`); return; }
+      await say(`:hourglass: Stopping *${projectName}*...`);
+      this.executeAction("stop_worker", { project: projectName })
+        .then(result => say(result)).catch(err => say(`:x: ${err}`));
     });
 
-    this.app.message(/^!logs\s+(\S+)\s*(\d+)?$/i, async ({ say, context }) => {
-      const [, projectName, lineCount] = context.matches!;
-      try {
-        const result = await this.executeAction("get_logs", {
-          project: projectName, lines: parseInt(lineCount || "30"),
-        });
-        await say(result);
-      } catch (err) {
-        await say(`:x: ${err}`);
-      }
+    // !logs [project] [lines]
+    this.app.message(/^!logs(?:\s+(\S+))?\s*(\d+)?$/i, async ({ say, message, context }) => {
+      const [, nameArg, lineCount] = context.matches!;
+      const projectName = nameArg?.trim() || this.projectNameFromChannel(message.channel);
+      if (!projectName) { await say(`:x: Specify a project name or run this from a project channel.`); return; }
+      this.executeAction("get_logs", {
+        project: projectName, lines: parseInt(lineCount || "30"),
+      }).then(result => say(result)).catch(err => say(`:x: ${err}`));
     });
 
     this.app.message(/^!tell\s+(\S+)\s+(.+)$/is, async ({ say, context }) => {
@@ -505,6 +498,16 @@ export class SlackBot {
         }
       }
     });
+  }
+
+  /**
+   * Look up the project name for a given Slack channel ID.
+   * Returns undefined if the channel isn't a project channel.
+   */
+  private projectNameFromChannel(channelId: string): string | undefined {
+    const projectId = this.channelToProject.get(channelId);
+    if (!projectId) return undefined;
+    return this.projectManager.get(projectId)?.name;
   }
 
   /**

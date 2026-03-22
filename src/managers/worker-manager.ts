@@ -1,11 +1,14 @@
 import { randomUUID } from "crypto";
-import { execSync, spawn, ChildProcess } from "child_process";
+import { execSync, spawn, exec, ChildProcess } from "child_process";
+import { promisify } from "util";
 import { config } from "../config.js";
 import { queries } from "../db/database.js";
 import { logger } from "../logger.js";
 import { ProjectManager, Project } from "./project-manager.js";
 import fs from "fs";
 import path from "path";
+
+const execAsync = promisify(exec);
 
 export interface Worker {
   id: string;
@@ -190,18 +193,17 @@ export class WorkerManager {
     ].filter(Boolean).join(" ");
 
     try {
-      // Use the startup script to launch claude and auto-accept all startup prompts
-      // (trust folder, API key, dangerous mode confirmation)
+      // Use the startup script to launch claude and auto-accept all startup prompts.
+      // Uses async exec so the event loop stays alive (keeps Slack WS heartbeats going).
       const startScript = path.resolve("scripts/start-worker.sh");
-      execSync(`bash "${startScript}" "${tmuxSession}" "${worktreePath}"`, {
+      await execAsync(`bash "${startScript}" "${tmuxSession}" "${worktreePath}"`, {
         env: {
           ...process.env,
           ANTHROPIC_API_KEY: config.anthropicApiKey,
           PATH: process.env.PATH,
           HOME: process.env.HOME,
         },
-        stdio: "pipe",
-        timeout: 20000, // 20s max for startup
+        timeout: 25000, // 25s max for startup
       });
 
       // Create a monitoring window in the feral main tmux session (if running in tmux)
@@ -370,6 +372,14 @@ export class WorkerManager {
 
   getForProject(projectId: string): Worker | undefined {
     return queries.getActiveWorkerForProject.get(projectId) as Worker | undefined;
+  }
+
+  /** Get any stoppable worker for a project — running, starting, or paused. */
+  getStoppableWorkerForProject(projectId: string): Worker | undefined {
+    const worker = queries.getLastWorkerForProject.get(projectId) as Worker | undefined;
+    if (!worker) return undefined;
+    if (["starting", "running", "paused"].includes(worker.status)) return worker;
+    return undefined;
   }
 
   /**
