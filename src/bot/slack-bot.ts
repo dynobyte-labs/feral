@@ -267,7 +267,14 @@ export class SlackBot {
         const project = this.projectManager.getByName(projectName);
         if (!project) return `:x: Project "${projectName}" not found`;
         const worker = this.workerManager.getStoppableWorkerForProject(project.id);
-        if (!worker) return `:warning: No active or paused worker for ${projectName}`;
+        if (!worker) {
+          // No worker record but project might still show active — reset it
+          if (project.status !== "idle") {
+            this.projectManager.setStatus(project.id, "idle");
+            return `:stop_button: *${projectName}* reset to idle (worker was already gone).`;
+          }
+          return `:white_circle: *${projectName}* is already idle.`;
+        }
         await this.workerManager.stop(worker.id);
         return `:stop_button: *${projectName}* stopped.`;
       }
