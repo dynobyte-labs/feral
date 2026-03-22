@@ -56,6 +56,11 @@ export class SlackBot {
 
     await this.app.start();
 
+    // Start polling worker output and forwarding it to project channels
+    this.workerManager.startOutputPolling(async (projectId, text) => {
+      await this.postToProject(projectId, text);
+    });
+
     const mode = isNluAvailable() ? "natural language + commands" : "commands only (set ANTHROPIC_API_KEY for natural language)";
     logger.info(`Slack bot started (socket mode, ${mode})`);
   }

@@ -35,8 +35,69 @@ export class WorkerManager {
   private processes: Map<string, ChildProcess> = new Map();
   private projectManager: ProjectManager;
 
+  /** Tracks last seen tmux output per worker to detect new content */
+  private lastOutput: Map<string, string> = new Map();
+  private pollInterval: ReturnType<typeof setInterval> | null = null;
+
   constructor(projectManager: ProjectManager) {
     this.projectManager = projectManager;
+  }
+
+  /**
+   * Start polling active workers for new output.
+   * Calls onOutput(projectId, newText) whenever a worker produces new content.
+   * Call this once after the bot starts.
+   */
+  startOutputPolling(onOutput: (projectId: string, text: string) => void, intervalMs = 3000): void {
+    if (this.pollInterval) return; // already running
+
+    this.pollInterval = setInterval(() => {
+      const activeWorkers = this.listActive();
+      for (const worker of activeWorkers) {
+        try {
+          const project = this.projectManager.get(worker.project_id);
+          if (!project) continue;
+
+          const tmuxSession = `feral-${project.name}`;
+          let current: string;
+          try {
+            current = execSync(
+              `tmux capture-pane -t "${tmuxSession}" -p -S -200`,
+              { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
+            );
+          } catch {
+            continue; // session not available yet
+          }
+
+          const last = this.lastOutput.get(worker.id) ?? "";
+
+          if (current !== last) {
+            // Find what's new — everything after the last known content
+            const newContent = current.length > last.length
+              ? current.slice(last.length).trim()
+              : current.trim(); // full refresh if shorter (screen cleared)
+
+            if (newContent.length > 0) {
+              this.lastOutput.set(worker.id, current);
+              onOutput(worker.project_id, newContent);
+            } else {
+              this.lastOutput.set(worker.id, current);
+            }
+          }
+        } catch (err) {
+          logger.debug(`Output poll error for worker ${worker.id}: ${err}`);
+        }
+      }
+    }, intervalMs);
+
+    logger.info(`Worker output polling started (every ${intervalMs}ms)`);
+  }
+
+  stopOutputPolling(): void {
+    if (this.pollInterval) {
+      clearInterval(this.pollInterval);
+      this.pollInterval = null;
+    }
   }
 
   /**
@@ -129,25 +190,37 @@ export class WorkerManager {
     ].filter(Boolean).join(" ");
 
     try {
-      // Kill existing tmux session if any
-      try { execSync(`tmux kill-session -t "${tmuxSession}" 2>/dev/null`); } catch { /* ignore */ }
+      // Use the startup script to launch claude and auto-accept all startup prompts
+      // (trust folder, API key, dangerous mode confirmation)
+      const startScript = path.resolve("scripts/start-worker.sh");
+      execSync(`bash "${startScript}" "${tmuxSession}" "${worktreePath}"`, {
+        env: {
+          ...process.env,
+          ANTHROPIC_API_KEY: config.anthropicApiKey,
+          PATH: process.env.PATH,
+          HOME: process.env.HOME,
+        },
+        stdio: "pipe",
+        timeout: 20000, // 20s max for startup
+      });
 
-      // Start new tmux session with Claude Code in interactive mode
-      execSync(
-        `tmux new-session -d -s "${tmuxSession}" -c "${worktreePath}" '${claudeCmd}'`,
-        {
-          env: {
-            ...process.env,
-            ANTHROPIC_API_KEY: config.anthropicApiKey,
-            PATH: process.env.PATH,
-            HOME: process.env.HOME,
-          },
-          stdio: "pipe",
-        }
-      );
+      // Create a monitoring window in the feral main tmux session (if running in tmux)
+      // This lets you watch worker activity with: tmux attach -t feral-monitor
+      try {
+        const monitorSession = "feral-monitor";
+        // Create monitor session if it doesn't exist
+        try {
+          execSync(`tmux new-session -d -s "${monitorSession}" 2>/dev/null`, { stdio: "pipe" });
+        } catch { /* already exists */ }
+        // Open a new window watching this worker
+        execSync(
+          `tmux new-window -t "${monitorSession}" -n "${project.name}" "tmux attach -t ${tmuxSession}"`,
+          { stdio: "pipe" }
+        );
+        logger.info(`Monitor window created: tmux attach -t ${monitorSession}`);
+      } catch { /* monitoring is optional, don't fail spawn */ }
 
-      // Give claude a moment to start up, then send the initial prompt
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Send the initial prompt
       const escapedPrompt = fullPrompt.replace(/'/g, "'\\''");
       execSync(`tmux send-keys -t "${tmuxSession}" '${escapedPrompt}' Enter`, {
         stdio: "pipe",
@@ -196,6 +269,7 @@ export class WorkerManager {
     } catch { /* ignore */ }
 
     queries.pauseWorker.run(workerId);
+    this.lastOutput.delete(workerId);
     this.projectManager.setStatus(worker.project_id, "paused");
     queries.addEvent.run(worker.project_id, workerId, "worker_paused", "Worker paused");
     logger.info(`Worker paused: ${workerId}`);
@@ -240,6 +314,7 @@ export class WorkerManager {
     }
 
     queries.stopWorker.run(workerId);
+    this.lastOutput.delete(workerId);
     if (project) {
       this.projectManager.setStatus(worker.project_id, "idle");
     }
