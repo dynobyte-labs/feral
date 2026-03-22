@@ -47,7 +47,7 @@ for i in $(seq 1 15); do
   # API key prompt
   if pane_contains "API key" || pane_contains "api key"; then
     echo "  Dismissing API key prompt..."
-    send ""
+    tmux send-keys -t "$SESSION" Enter
     sleep 1
     continue
   fi
@@ -55,7 +55,7 @@ for i in $(seq 1 15); do
   # Dangerous mode confirmation
   if pane_contains "bypass" || pane_contains "dangerous" || pane_contains "skip-perm"; then
     echo "  Confirming dangerous mode..."
-    send ""
+    tmux send-keys -t "$SESSION" Enter
     sleep 1
     continue
   fi

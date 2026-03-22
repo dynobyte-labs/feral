@@ -196,15 +196,26 @@ export class WorkerManager {
       // Use the startup script to launch claude and auto-accept all startup prompts.
       // Uses async exec so the event loop stays alive (keeps Slack WS heartbeats going).
       const startScript = path.resolve("scripts/start-worker.sh");
-      await execAsync(`bash "${startScript}" "${tmuxSession}" "${worktreePath}"`, {
-        env: {
-          ...process.env,
-          ANTHROPIC_API_KEY: config.anthropicApiKey,
-          PATH: process.env.PATH,
-          HOME: process.env.HOME,
-        },
-        timeout: 25000, // 25s max for startup
-      });
+      try {
+        await execAsync(`bash "${startScript}" "${tmuxSession}" "${worktreePath}"`, {
+          env: {
+            ...process.env,
+            ANTHROPIC_API_KEY: config.anthropicApiKey,
+            PATH: process.env.PATH,
+            HOME: process.env.HOME,
+          },
+          timeout: 25000,
+        });
+      } catch (scriptErr) {
+        // Script may exit non-zero even if tmux session started fine.
+        // Check if the session actually exists before treating as a real failure.
+        try {
+          execSync(`tmux has-session -t "${tmuxSession}" 2>/dev/null`, { stdio: "pipe" });
+          logger.warn(`Startup script returned non-zero but tmux session exists — continuing. Error: ${scriptErr}`);
+        } catch {
+          throw scriptErr; // Session really didn't start
+        }
+      }
 
       // Create a monitoring window in the feral main tmux session (if running in tmux)
       // This lets you watch worker activity with: tmux attach -t feral-monitor
