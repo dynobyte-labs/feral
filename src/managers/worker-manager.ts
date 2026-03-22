@@ -101,15 +101,9 @@ export class WorkerManager {
       }
     }
 
-    // Check if we should resume a previous session
-    let resumeFlag = "";
-    if (options.resume) {
-      const lastWorker = queries.getLastWorkerForProject.get(projectId) as Worker | undefined;
-      if (lastWorker?.session_id) {
-        resumeFlag = `--resume "${lastWorker.session_id}"`;
-        logger.info(`Resuming session: ${lastWorker.session_id}`);
-      }
-    }
+    // In interactive mode, claude maintains its own session history.
+    // No --resume flag needed — we inject the project brief into the prompt instead.
+    const resumeFlag = "";
 
     // Inject project brief into prompt if resuming
     let fullPrompt = prompt;
@@ -125,13 +119,12 @@ export class WorkerManager {
     this.projectManager.setStatus(projectId, "active");
 
     // Spawn Claude Code in a tmux session
+    // Run claude in interactive mode (no -p flag) so the session stays alive
+    // and we can keep sending messages to it via tmux send-keys.
     const tmuxSession = `feral-${project.name}`;
     const claudeCmd = [
       "claude",
-      "-p", JSON.stringify(fullPrompt),
       "--dangerously-skip-permissions",
-      "--output-format", "stream-json",
-      "--name", sessionName,
       resumeFlag,
     ].filter(Boolean).join(" ");
 
@@ -139,7 +132,7 @@ export class WorkerManager {
       // Kill existing tmux session if any
       try { execSync(`tmux kill-session -t "${tmuxSession}" 2>/dev/null`); } catch { /* ignore */ }
 
-      // Start new tmux session with Claude Code
+      // Start new tmux session with Claude Code in interactive mode
       execSync(
         `tmux new-session -d -s "${tmuxSession}" -c "${worktreePath}" '${claudeCmd}'`,
         {
@@ -152,6 +145,13 @@ export class WorkerManager {
           stdio: "pipe",
         }
       );
+
+      // Give claude a moment to start up, then send the initial prompt
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      const escapedPrompt = fullPrompt.replace(/'/g, "'\\''");
+      execSync(`tmux send-keys -t "${tmuxSession}" '${escapedPrompt}' Enter`, {
+        stdio: "pipe",
+      });
 
       queries.updateWorkerStatus.run("running", workerId);
       queries.addEvent.run(projectId, workerId, "worker_started", `Worker started on branch ${branch}`);
