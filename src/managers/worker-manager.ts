@@ -48,6 +48,22 @@ export class WorkerManager {
     const project = this.projectManager.get(projectId);
     if (!project) throw new Error(`Project not found: ${projectId}`);
 
+    // Verify tmux and claude CLI are available
+    try {
+      execSync("which tmux", { stdio: "pipe" });
+    } catch {
+      throw new Error(
+        "tmux is not installed. Install it with: brew install tmux (macOS) or apt install tmux (Linux)"
+      );
+    }
+    try {
+      execSync("which claude", { stdio: "pipe" });
+    } catch {
+      throw new Error(
+        "Claude Code CLI is not installed. Install it with: npm install -g @anthropic-ai/claude-code"
+      );
+    }
+
     // Check active worker limit
     const activeWorkers = this.listActive();
     if (activeWorkers.length >= config.maxWorkers) {
@@ -109,7 +125,7 @@ export class WorkerManager {
     this.projectManager.setStatus(projectId, "active");
 
     // Spawn Claude Code in a tmux session
-    const tmuxSession = `farm-${project.name}`;
+    const tmuxSession = `feral-${project.name}`;
     const claudeCmd = [
       "claude",
       "-p", JSON.stringify(fullPrompt),
@@ -160,7 +176,7 @@ export class WorkerManager {
     const project = this.projectManager.get(worker.project_id);
     if (!project) throw new Error(`Project not found for worker`);
 
-    const tmuxSession = `farm-${project.name}`;
+    const tmuxSession = `feral-${project.name}`;
 
     // Capture last output as summary
     try {
@@ -213,7 +229,7 @@ export class WorkerManager {
     if (!worker) throw new Error(`Worker not found: ${workerId}`);
 
     const project = this.projectManager.get(worker.project_id);
-    const tmuxSession = project ? `farm-${project.name}` : null;
+    const tmuxSession = project ? `feral-${project.name}` : null;
 
     if (tmuxSession) {
       try { execSync(`tmux kill-session -t "${tmuxSession}" 2>/dev/null`); } catch { /* ignore */ }
@@ -242,7 +258,7 @@ export class WorkerManager {
     const project = this.projectManager.get(worker.project_id);
     if (!project) throw new Error(`Project not found`);
 
-    const tmuxSession = `farm-${project.name}`;
+    const tmuxSession = `feral-${project.name}`;
     // Send keys to the tmux session
     execSync(`tmux send-keys -t "${tmuxSession}" "${message.replace(/"/g, '\\"')}" Enter`, {
       stdio: "pipe",
@@ -262,7 +278,7 @@ export class WorkerManager {
     const project = this.projectManager.get(worker.project_id);
     if (!project) return "(no project)";
 
-    const tmuxSession = `farm-${project.name}`;
+    const tmuxSession = `feral-${project.name}`;
     try {
       return execSync(
         `tmux capture-pane -t "${tmuxSession}" -p -S -${lines}`,

@@ -12,7 +12,7 @@ NODE_PATH="$(which node)"
 NPX_PATH="$(which npx)"
 
 echo "Installing launchd agent..."
-echo "  Farm directory: $FERAL_DIR"
+echo "  Feral directory: $FERAL_DIR"
 echo "  Node: $NODE_PATH"
 
 # Build first

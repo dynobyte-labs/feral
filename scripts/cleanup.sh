@@ -5,7 +5,7 @@
 # =============================================================================
 set -e
 
-echo "Claude Dev Farm — Cleanup"
+echo "Feral — Cleanup"
 echo "========================="
 
 PROJECTS_DIR="${PROJECTS_DIR:-$HOME/projects}"
@@ -65,7 +65,7 @@ echo ""
 echo "[5] Disk usage summary..."
 echo "  Projects:     $(du -sh "$PROJECTS_DIR" 2>/dev/null | cut -f1)"
 echo "  Worktrees:    $(du -sh "$WORKTREES_DIR" 2>/dev/null | cut -f1)"
-echo "  Farm data:    $(du -sh "$HOME/claude-dev-farm/data" 2>/dev/null | cut -f1)"
+echo "  Feral data:   $(du -sh "data" 2>/dev/null | cut -f1)"
 echo "  Total disk:   $(df -h / | tail -1 | awk '{print $3 "/" $2 " used (" $5 ")"}')"
 echo ""
 echo "Cleanup complete."

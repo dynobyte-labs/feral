@@ -69,12 +69,12 @@ echo ""
 
 # --- Project setup ---
 echo "[10/10] Setting up Feral..."
-FARM_DIR="$HOME/feral"
-if [ ! -d "$FARM_DIR" ]; then
-  echo "  Cloning to $FARM_DIR..."
-  git clone https://github.com/dynobyte-labs/feral.git "$FARM_DIR"
+FERAL_DIR="$HOME/feral"
+if [ ! -d "$FERAL_DIR" ]; then
+  echo "  Cloning to $FERAL_DIR..."
+  git clone https://github.com/dynobyte-labs/feral.git "$FERAL_DIR"
 fi
-cd "$FARM_DIR"
+cd "$FERAL_DIR"
 npm install
 mkdir -p data ~/projects
 
