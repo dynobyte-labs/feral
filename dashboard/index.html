@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Feral — Dashboard</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0b0d14; --bg2: #0f1219;
+    --surface: #161a25; --surface2: #1c2130; --surface3: #232838;
+    --border: #2a3045; --border-light: #353b52;
+    --text: #e4e7f0; --text2: #c0c5d4; --muted: #7b82a0;
+    --accent: #6c7cff; --accent-dim: rgba(108,124,255,0.12);
+    --green: #34d399; --green-dim: rgba(52,211,153,0.12);
+    --orange: #f59e0b; --orange-dim: rgba(245,158,11,0.12);
+    --red: #f87171; --red-dim: rgba(248,113,113,0.12);
+    --cyan: #22d3ee; --cyan-dim: rgba(34,211,238,0.12);
+    --purple: #a78bfa; --purple-dim: rgba(167,139,250,0.12);
+    --radius: 12px; --radius-sm: 8px;
+    --shadow: 0 2px 12px rgba(0,0,0,0.3);
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100vh;
+  }
+
+  /* ---- Top Nav ---- */
+  .topbar {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 14px 28px; display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 100; backdrop-filter: blur(12px);
+  }
+  .topbar-left { display: flex; align-items: center; gap: 14px; }
+  .logo { font-size: 20px; font-weight: 700; color: var(--accent); letter-spacing: -0.5px; }
+  .logo span { color: var(--text); font-weight: 400; }
+  .topbar-status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+  .topbar-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+  .topbar-status .dot.disconnected { background: var(--red); }
+  .topbar-right { display: flex; align-items: center; gap: 12px; }
+  .btn-icon {
+    width: 36px; height: 36px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+    background: var(--surface2); color: var(--muted); display: flex; align-items: center;
+    justify-content: center; cursor: pointer; font-size: 16px; transition: all 0.2s;
+  }
+  .btn-icon:hover { border-color: var(--accent); color: var(--text); }
+
+  /* ---- Layout ---- */
+  .layout { display: flex; height: calc(100vh - 61px); }
+  .main { flex: 1; overflow-y: auto; padding: 24px 28px; }
+  .sidebar {
+    width: 380px; min-width: 380px; background: var(--surface);
+    border-left: 1px solid var(--border); overflow-y: auto;
+    display: flex; flex-direction: column;
+  }
+  .sidebar.hidden { display: none; }
+  .sidebar-header {
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .sidebar-header h3 { font-size: 14px; font-weight: 600; }
+  .sidebar-close { cursor: pointer; color: var(--muted); font-size: 18px; padding: 4px; }
+  .sidebar-close:hover { color: var(--text); }
+  .sidebar-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
+
+  /* ---- Stats Row ---- */
+  .stats-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 28px; }
+  .stat-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 18px 20px; position: relative; overflow: hidden;
+  }
+  .stat-card::after {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  }
+  .stat-card.accent::after { background: var(--accent); }
+  .stat-card.green::after { background: var(--green); }
+  .stat-card.orange::after { background: var(--orange); }
+  .stat-card.cyan::after { background: var(--cyan); }
+  .stat-card.purple::after { background: var(--purple); }
+  .stat-value { font-size: 30px; font-weight: 700; line-height: 1; margin-bottom: 4px; }
+  .stat-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-sub { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+  /* ---- Section Headers ---- */
+  .section-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .section-header h2 { font-size: 16px; font-weight: 600; }
+  .section-tabs { display: flex; gap: 4px; }
+  .tab {
+    padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 500;
+    border: 1px solid var(--border); background: transparent; color: var(--muted);
+    cursor: pointer; transition: all 0.2s;
+  }
+  .tab.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+  .tab:hover:not(.active) { border-color: var(--border-light); color: var(--text2); }
+
+  /* ---- Project Cards Grid ---- */
+  .projects-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; margin-bottom: 32px; }
+
+  .project-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 20px; cursor: pointer; transition: all 0.2s; position: relative;
+  }
+  .project-card:hover { border-color: var(--border-light); transform: translateY(-1px); box-shadow: var(--shadow); }
+  .project-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+  .card-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 12px; }
+  .card-title { font-size: 15px; font-weight: 600; }
+  .card-template { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  .badge {
+    padding: 3px 10px; border-radius: 20px; font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;
+  }
+  .badge.active { background: var(--green-dim); color: var(--green); }
+  .badge.paused { background: var(--orange-dim); color: var(--orange); }
+  .badge.idle { background: var(--surface3); color: var(--muted); }
+  .badge.error { background: var(--red-dim); color: var(--red); }
+  .badge.creating { background: var(--cyan-dim); color: var(--cyan); }
+
+  .card-desc { font-size: 12px; color: var(--text2); margin-bottom: 14px; line-height: 1.5; }
+
+  .card-worker {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 10px 12px; margin-bottom: 12px;
+  }
+  .worker-row { display: flex; align-items: center; justify-content: space-between; }
+  .worker-label { font-size: 11px; color: var(--muted); }
+  .worker-value { font-size: 12px; font-weight: 500; }
+  .worker-row + .worker-row { margin-top: 6px; }
+
+  .card-footer { display: flex; align-items: center; justify-content: space-between; }
+  .card-meta { font-size: 11px; color: var(--muted); }
+  .card-actions { display: flex; gap: 6px; }
+
+  .btn {
+    padding: 6px 14px; border-radius: var(--radius-sm); font-size: 12px; font-weight: 500;
+    border: 1px solid var(--border); background: var(--surface2); color: var(--text);
+    cursor: pointer; transition: all 0.15s; white-space: nowrap;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: #7b8aff; }
+  .btn.danger { color: var(--red); }
+  .btn.danger:hover { border-color: var(--red); background: var(--red-dim); }
+  .btn.sm { padding: 4px 10px; font-size: 11px; }
+
+  /* ---- Agent/Worker Table ---- */
+  .workers-section { margin-bottom: 32px; }
+  .workers-table { width: 100%; border-collapse: collapse; }
+  .workers-table th {
+    text-align: left; font-size: 11px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.5px; padding: 10px 14px; border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .workers-table td {
+    padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: 13px;
+    vertical-align: middle;
+  }
+  .workers-table tr { background: var(--surface); cursor: pointer; transition: background 0.15s; }
+  .workers-table tr:hover { background: var(--surface2); }
+
+  .worker-name { font-weight: 600; color: var(--text); }
+  .worker-project { color: var(--text2); }
+  .worker-session { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; color: var(--muted); }
+  .worker-msgs { font-weight: 600; }
+
+  .pulse {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    margin-right: 6px; vertical-align: middle;
+  }
+  .pulse.running { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
+  .pulse.paused { background: var(--orange); }
+  .pulse.stopped { background: var(--muted); }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+  /* ---- Activity Feed ---- */
+  .activity-feed { max-height: 100%; }
+  .event-item {
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+    display: flex; gap: 10px; font-size: 12px;
+  }
+  .event-item:last-child { border-bottom: none; }
+  .event-icon {
+    width: 28px; height: 28px; border-radius: 50%; display: flex;
+    align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0;
+  }
+  .event-icon.create { background: var(--green-dim); color: var(--green); }
+  .event-icon.pause { background: var(--orange-dim); color: var(--orange); }
+  .event-icon.resume { background: var(--accent-dim); color: var(--accent); }
+  .event-icon.error { background: var(--red-dim); color: var(--red); }
+  .event-icon.message { background: var(--cyan-dim); color: var(--cyan); }
+  .event-icon.stop { background: var(--surface3); color: var(--muted); }
+  .event-body { flex: 1; }
+  .event-text { color: var(--text2); line-height: 1.4; }
+  .event-text strong { color: var(--text); }
+  .event-time { color: var(--muted); font-size: 11px; margin-top: 2px; }
+
+  /* ---- Sidebar: Logs ---- */
+  .log-viewer {
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 14px; font-family: 'SF Mono', 'Fira Code', 'Menlo', monospace;
+    font-size: 11px; line-height: 1.7; color: var(--text2); max-height: 400px;
+    overflow-y: auto; white-space: pre-wrap; word-break: break-word;
+  }
+  .log-viewer .log-line { padding: 1px 0; }
+  .log-viewer .log-line.error { color: var(--red); }
+  .log-viewer .log-line.warn { color: var(--orange); }
+
+  /* ---- Sidebar: Send Message ---- */
+  .message-input-wrap {
+    display: flex; gap: 8px; padding: 12px 20px;
+    border-top: 1px solid var(--border); background: var(--surface);
+  }
+  .message-input {
+    flex: 1; padding: 8px 12px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border); background: var(--surface2);
+    color: var(--text); font-size: 13px; outline: none;
+  }
+  .message-input:focus { border-color: var(--accent); }
+
+  /* ---- Sidebar: Project Detail ---- */
+  .detail-section { margin-bottom: 20px; }
+  .detail-section h4 { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .detail-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; }
+  .detail-row .label { color: var(--muted); }
+  .detail-row .value { color: var(--text); font-weight: 500; text-align: right; }
+  .detail-row .value a { color: var(--cyan); text-decoration: none; }
+  .detail-row .value a:hover { text-decoration: underline; }
+  .brief-content {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 12px; font-size: 12px; color: var(--text2); line-height: 1.6;
+    max-height: 200px; overflow-y: auto; white-space: pre-wrap;
+  }
+  .detail-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  /* ---- Modal ---- */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s;
+  }
+  .modal-overlay.open { opacity: 1; pointer-events: auto; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+    width: 480px; max-width: 90vw; box-shadow: 0 16px 48px rgba(0,0,0,0.4);
+  }
+  .modal-header { padding: 20px 24px 0; }
+  .modal-header h3 { font-size: 17px; font-weight: 600; }
+  .modal-header p { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .modal-body { padding: 20px 24px; }
+  .modal-footer { padding: 0 24px 20px; display: flex; justify-content: flex-end; gap: 8px; }
+
+  .form-field { margin-bottom: 14px; }
+  .form-field label { display: block; font-size: 12px; font-weight: 500; color: var(--text2); margin-bottom: 6px; }
+  .form-field input, .form-field select, .form-field textarea {
+    width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--surface2); color: var(--text); font-size: 13px; outline: none;
+    font-family: inherit;
+  }
+  .form-field input:focus, .form-field select:focus, .form-field textarea:focus { border-color: var(--accent); }
+  .form-field textarea { resize: vertical; min-height: 80px; }
+
+  /* ---- Empty State ---- */
+  .empty-state {
+    text-align: center; padding: 60px 20px; color: var(--muted);
+  }
+  .empty-state .icon { font-size: 48px; margin-bottom: 16px; opacity: 0.4; }
+  .empty-state p { font-size: 14px; margin-bottom: 20px; }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 900px) {
+    .stats-row { grid-template-columns: repeat(3, 1fr); }
+    .sidebar { position: fixed; right: 0; top: 61px; bottom: 0; z-index: 50; box-shadow: -8px 0 24px rgba(0,0,0,0.4); }
+    .projects-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 600px) {
+    .stats-row { grid-template-columns: repeat(2, 1fr); }
+    .topbar { padding: 12px 16px; }
+    .main { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Top Bar -->
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="logo">Feral <span>Dashboard</span></div>
+    <div class="topbar-status">
+      <div class="dot" id="conn-dot"></div>
+      <span id="conn-text">Connected</span>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <button class="btn primary" onclick="openNewProjectModal()">+ New Project</button>
+    <button class="btn-icon" onclick="refresh()" title="Refresh">&#x21bb;</button>
+    <button class="btn-icon" onclick="toggleSidebar()" title="Toggle Activity" id="sidebar-toggle">&#x25e8;</button>
+  </div>
+</div>
+
+<!-- Layout -->
+<div class="layout">
+  <div class="main" id="main">
+
+    <!-- Stats Row -->
+    <div class="stats-row">
+      <div class="stat-card accent">
+        <div class="stat-value" id="s-projects">–</div>
+        <div class="stat-label">Total Projects</div>
+        <div class="stat-sub" id="s-projects-sub"></div>
+      </div>
+      <div class="stat-card green">
+        <div class="stat-value" id="s-active">–</div>
+        <div class="stat-label">Active Workers</div>
+        <div class="stat-sub" id="s-active-sub"></div>
+      </div>
+      <div class="stat-card orange">
+        <div class="stat-value" id="s-paused">–</div>
+        <div class="stat-label">Paused</div>
+        <div class="stat-sub">Ready to resume</div>
+      </div>
+      <div class="stat-card cyan">
+        <div class="stat-value" id="s-messages">–</div>
+        <div class="stat-label">Messages</div>
+        <div class="stat-sub">Across all workers</div>
+      </div>
+      <div class="stat-card purple">
+        <div class="stat-value" id="s-uptime">–</div>
+        <div class="stat-label">Uptime</div>
+        <div class="stat-sub" id="s-uptime-sub"></div>
+      </div>
+    </div>
+
+    <!-- Projects Section -->
+    <div class="section-header">
+      <h2>Projects</h2>
+      <div class="section-tabs">
+        <button class="tab active" data-filter="all" onclick="setFilter('all', this)">All</button>
+        <button class="tab" data-filter="active" onclick="setFilter('active', this)">Active</button>
+        <button class="tab" data-filter="paused" onclick="setFilter('paused', this)">Paused</button>
+        <button class="tab" data-filter="idle" onclick="setFilter('idle', this)">Idle</button>
+      </div>
+    </div>
+    <div class="projects-grid" id="projects-grid"></div>
+
+    <!-- Workers Table -->
+    <div class="workers-section">
+      <div class="section-header">
+        <h2>Workers / Agents</h2>
+      </div>
+      <table class="workers-table" id="workers-table">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Worker</th>
+            <th>Project</th>
+            <th>Branch</th>
+            <th>Session</th>
+            <th>Messages</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="workers-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <h3 id="sidebar-title">Activity Feed</h3>
+      <span class="sidebar-close" onclick="closeSidebar()">&times;</span>
+    </div>
+    <div class="sidebar-body" id="sidebar-body"></div>
+    <div class="message-input-wrap" id="msg-wrap" style="display:none">
+      <input class="message-input" id="msg-input" placeholder="Send message to worker..." onkeydown="if(event.key==='Enter')sendMsg()">
+      <button class="btn primary sm" onclick="sendMsg()">Send</button>
+    </div>
+  </div>
+</div>
+
+<!-- New Project Modal -->
+<div class="modal-overlay" id="new-project-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Create New Project</h3>
+      <p>Set up a new project with folder, git repo, and Slack channel</p>
+    </div>
+    <div class="modal-body">
+      <div class="form-field">
+        <label>Project Name</label>
+        <input id="np-name" placeholder="my-awesome-app">
+      </div>
+      <div class="form-field">
+        <label>Template</label>
+        <select id="np-template">
+          <option value="empty">Empty</option>
+          <option value="web">Web (Next.js)</option>
+          <option value="api">API (Express + TS)</option>
+          <option value="ios">iOS (SwiftUI)</option>
+          <option value="fullstack">Fullstack (Monorepo)</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label>Description</label>
+        <textarea id="np-desc" placeholder="Brief description of the project..."></textarea>
+      </div>
+      <div class="form-field">
+        <label>Initial Prompt for Claude</label>
+        <textarea id="np-prompt" placeholder="What should Claude start working on?"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn primary" onclick="createProject()">Create Project</button>
+    </div>
+  </div>
+</div>
+
+<!-- Logs Modal -->
+<div class="modal-overlay" id="logs-modal">
+  <div class="modal" style="width:640px">
+    <div class="modal-header">
+      <h3 id="logs-title">Worker Logs</h3>
+      <p>Live output from the Claude Code session</p>
+    </div>
+    <div class="modal-body">
+      <div class="log-viewer" id="logs-content">Loading...</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeLogsModal()">Close</button>
+      <button class="btn primary" onclick="refreshLogs()">Refresh</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---- State ----
+let state = { projects: [], workers: [], health: {}, events: [], selectedProject: null, currentFilter: 'all', sidebarMode: 'activity', currentLogWorkerId: null };
+const API = '';
+
+// ---- Data Fetching ----
+async function fetchData() {
+  try {
+    const [projRes, workersRes, healthRes] = await Promise.all([
+      fetch(`${API}/api/projects`),
+      fetch(`${API}/api/workers`),
+      fetch(`${API}/api/health`),
+    ]);
+    state.projects = await projRes.json();
+    state.workers = await workersRes.json();
+    state.health = await healthRes.json();
+    document.getElementById('conn-dot').className = 'dot';
+    document.getElementById('conn-text').textContent = 'Connected';
+    return true;
+  } catch (e) {
+    document.getElementById('conn-dot').className = 'dot disconnected';
+    document.getElementById('conn-text').textContent = 'Disconnected';
+    return false;
+  }
+}
+
+async function fetchProjectDetail(id) {
+  try {
+    const res = await fetch(`${API}/api/projects/${id}`);
+    return await res.json();
+  } catch (e) { return null; }
+}
+
+// ---- Render ----
+function render() {
+  renderStats();
+  renderProjects();
+  renderWorkers();
+  if (state.sidebarMode === 'activity') renderActivity();
+  else if (state.sidebarMode === 'detail' && state.selectedProject) renderProjectDetail();
+}
+
+function renderStats() {
+  const h = state.health;
+  const projects = state.projects;
+  const activeCount = projects.filter(p => p.status === 'active').length;
+  const pausedCount = projects.filter(p => p.status === 'paused').length;
+  const totalMsgs = state.workers.reduce((sum, w) => sum + (w.message_count || 0), 0)
+    + projects.reduce((sum, p) => sum + (p.activeWorker?.message_count || 0), 0);
+
+  document.getElementById('s-projects').textContent = projects.length;
+  document.getElementById('s-projects-sub').textContent = `${activeCount} active, ${pausedCount} paused`;
+  document.getElementById('s-active').textContent = `${h.activeWorkers || 0}`;
+  document.getElementById('s-active-sub').textContent = `of ${h.maxWorkers || 4} max`;
+  document.getElementById('s-paused').textContent = pausedCount;
+  document.getElementById('s-messages').textContent = totalMsgs;
+  document.getElementById('s-uptime').textContent = formatUptime(h.uptime || 0);
+  document.getElementById('s-uptime-sub').textContent = `Since ${new Date(Date.now() - (h.uptime || 0) * 1000).toLocaleTimeString()}`;
+}
+
+function renderProjects() {
+  const grid = document.getElementById('projects-grid');
+  let filtered = state.projects;
+  if (state.currentFilter !== 'all') {
+    filtered = filtered.filter(p => p.status === state.currentFilter);
+  }
+
+  if (filtered.length === 0) {
+    grid.innerHTML = `<div class="empty-state"><div class="icon">&#x1f4c1;</div><p>${
+      state.currentFilter !== 'all'
+        ? `No ${state.currentFilter} projects`
+        : 'No projects yet. Create one to get started!'
+    }</p></div>`;
+    return;
+  }
+
+  grid.innerHTML = filtered.map(p => {
+    const w = p.activeWorker;
+    const isSelected = state.selectedProject === p.id;
+    return `
+      <div class="project-card ${isSelected ? 'selected' : ''}" onclick="selectProject('${p.id}')">
+        <div class="card-top">
+          <div>
+            <div class="card-title">${esc(p.name)}</div>
+            <div class="card-template">${esc(p.template)} template</div>
+          </div>
+          <span class="badge ${p.status}">${p.status}</span>
+        </div>
+        ${p.description ? `<div class="card-desc">${esc(p.description)}</div>` : ''}
+        ${w ? `
+          <div class="card-worker">
+            <div class="worker-row">
+              <span class="worker-label">Worker</span>
+              <span class="worker-value"><span class="pulse running"></span>${esc(w.session_name || 'worker')}</span>
+            </div>
+            <div class="worker-row">
+              <span class="worker-label">Branch</span>
+              <span class="worker-value">${esc(w.branch || 'main')}</span>
+            </div>
+            <div class="worker-row">
+              <span class="worker-label">Messages</span>
+              <span class="worker-value">${w.message_count || 0}</span>
+            </div>
+          </div>
+        ` : ''}
+        <div class="card-footer">
+          <span class="card-meta">${timeAgo(p.updated_at)}</span>
+          <div class="card-actions" onclick="event.stopPropagation()">
+            ${p.status === 'active' && w ? `
+              <button class="btn sm" onclick="pauseWorker('${w.id}')">Pause</button>
+              <button class="btn sm" onclick="showLogs('${w.id}', '${esc(p.name)}')">Logs</button>
+            ` : ''}
+            ${p.status === 'paused' ? `
+              <button class="btn sm primary" onclick="resumeProject('${p.id}')">Resume</button>
+            ` : ''}
+            ${p.status === 'idle' ? `
+              <button class="btn sm primary" onclick="startWorker('${p.id}', '${esc(p.name)}')">Start</button>
+            ` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderWorkers() {
+  const tbody = document.getElementById('workers-body');
+
+  // Combine active workers from both sources
+  const allWorkers = [];
+  state.projects.forEach(p => {
+    if (p.activeWorker) {
+      allWorkers.push({ ...p.activeWorker, projectName: p.name, projectStatus: 'active' });
+    }
+  });
+  // Also add standalone workers
+  state.workers.forEach(w => {
+    if (!allWorkers.find(aw => aw.id === w.id)) {
+      const proj = state.projects.find(p => p.id === w.project_id);
+      allWorkers.push({ ...w, projectName: proj?.name || '—', projectStatus: w.status });
+    }
+  });
+
+  // Also show paused projects as paused workers
+  state.projects.filter(p => p.status === 'paused').forEach(p => {
+    if (!allWorkers.find(w => w.project_id === p.id)) {
+      allWorkers.push({
+        id: `paused-${p.id}`, session_name: 'paused', project_id: p.id,
+        projectName: p.name, projectStatus: 'paused', branch: '—',
+        session_id: p.last_session_id || '—', message_count: 0, status: 'paused'
+      });
+    }
+  });
+
+  if (allWorkers.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:32px">No workers running</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = allWorkers.map(w => {
+    const statusClass = w.status === 'running' || w.projectStatus === 'active' ? 'running' : w.status === 'paused' || w.projectStatus === 'paused' ? 'paused' : 'stopped';
+    const statusLabel = statusClass === 'running' ? 'Running' : statusClass === 'paused' ? 'Paused' : 'Stopped';
+    return `
+      <tr onclick="selectProject('${w.project_id}')">
+        <td><span class="pulse ${statusClass}"></span>${statusLabel}</td>
+        <td class="worker-name">${esc(w.session_name || 'worker')}</td>
+        <td class="worker-project">${esc(w.projectName)}</td>
+        <td>${esc(w.branch || '—')}</td>
+        <td class="worker-session">${w.session_id ? esc(String(w.session_id).slice(0, 12)) + '...' : '—'}</td>
+        <td class="worker-msgs">${w.message_count || 0}</td>
+        <td onclick="event.stopPropagation()">
+          ${statusClass === 'running' ? `
+            <button class="btn sm" onclick="pauseWorker('${w.id}')">Pause</button>
+            <button class="btn sm" onclick="showLogs('${w.id}', '${esc(w.projectName)}')">Logs</button>
+          ` : statusClass === 'paused' ? `
+            <button class="btn sm primary" onclick="resumeProject('${w.project_id}')">Resume</button>
+          ` : ''}
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function renderActivity() {
+  const body = document.getElementById('sidebar-body');
+  document.getElementById('sidebar-title').textContent = 'Activity Feed';
+  document.getElementById('msg-wrap').style.display = 'none';
+
+  // Build events from project data
+  const events = [];
+  state.projects.forEach(p => {
+    events.push({
+      type: p.status === 'active' ? 'active' : p.status === 'paused' ? 'pause' : 'idle',
+      project: p.name,
+      text: p.status === 'active' ? `<strong>${esc(p.name)}</strong> is actively running` :
+            p.status === 'paused' ? `<strong>${esc(p.name)}</strong> is paused` :
+            `<strong>${esc(p.name)}</strong> is idle`,
+      time: p.updated_at
+    });
+  });
+
+  events.sort((a, b) => new Date(b.time) - new Date(a.time));
+
+  if (events.length === 0) {
+    body.innerHTML = '<div class="empty-state"><p>No activity yet</p></div>';
+    return;
+  }
+
+  body.innerHTML = '<div class="activity-feed">' + events.map(e => {
+    const iconClass = e.type === 'active' ? 'create' : e.type === 'pause' ? 'pause' : 'stop';
+    const icons = { create: '&#x25B6;', pause: '&#x23F8;', resume: '&#x21BB;', error: '&#x26A0;', message: '&#x2709;', stop: '&#x25A0;', active: '&#x25B6;', idle: '&#x25CB;' };
+    return `
+      <div class="event-item">
+        <div class="event-icon ${iconClass}">${icons[e.type] || '&#x2022;'}</div>
+        <div class="event-body">
+          <div class="event-text">${e.text}</div>
+          <div class="event-time">${timeAgo(e.time)}</div>
+        </div>
+      </div>
+    `;
+  }).join('') + '</div>';
+}
+
+async function renderProjectDetail() {
+  const body = document.getElementById('sidebar-body');
+  document.getElementById('sidebar-title').textContent = 'Project Details';
+
+  const detail = await fetchProjectDetail(state.selectedProject);
+  if (!detail) { body.innerHTML = '<p>Error loading project</p>'; return; }
+
+  const hasWorker = detail.activeWorker && detail.status === 'active';
+  document.getElementById('msg-wrap').style.display = hasWorker ? 'flex' : 'none';
+
+  body.innerHTML = `
+    <div class="detail-section">
+      <h4>Overview</h4>
+      <div class="detail-row"><span class="label">Name</span><span class="value">${esc(detail.name)}</span></div>
+      <div class="detail-row"><span class="label">Status</span><span class="value"><span class="badge ${detail.status}">${detail.status}</span></span></div>
+      <div class="detail-row"><span class="label">Template</span><span class="value">${esc(detail.template)}</span></div>
+      <div class="detail-row"><span class="label">Path</span><span class="value" style="font-size:11px;font-family:monospace">${esc(detail.path || '—')}</span></div>
+      ${detail.repo_url ? `<div class="detail-row"><span class="label">GitHub</span><span class="value"><a href="${esc(detail.repo_url)}" target="_blank">${esc(detail.repo_url.split('/').slice(-1)[0])}</a></span></div>` : ''}
+      ${detail.slack_channel_id ? `<div class="detail-row"><span class="label">Slack</span><span class="value">#proj-${esc(detail.name)}</span></div>` : ''}
+    </div>
+
+    ${detail.activeWorker ? `
+      <div class="detail-section">
+        <h4>Active Worker</h4>
+        <div class="detail-row"><span class="label">Session</span><span class="value worker-session">${esc(detail.activeWorker.session_name || '—')}</span></div>
+        <div class="detail-row"><span class="label">Branch</span><span class="value">${esc(detail.activeWorker.branch || 'main')}</span></div>
+        <div class="detail-row"><span class="label">Messages</span><span class="value">${detail.activeWorker.message_count || 0}</span></div>
+        <div class="detail-row"><span class="label">Status</span><span class="value"><span class="pulse running"></span>Running</span></div>
+      </div>
+    ` : ''}
+
+    ${detail.brief ? `
+      <div class="detail-section">
+        <h4>Project Brief</h4>
+        <div class="brief-content">${esc(detail.brief)}</div>
+      </div>
+    ` : ''}
+
+    ${detail.events && detail.events.length > 0 ? `
+      <div class="detail-section">
+        <h4>Recent Events</h4>
+        <div class="activity-feed">
+          ${detail.events.slice(0, 20).map(e => `
+            <div class="event-item">
+              <div class="event-icon ${e.type === 'error' ? 'error' : 'message'}">${e.type === 'error' ? '&#x26A0;' : '&#x2022;'}</div>
+              <div class="event-body">
+                <div class="event-text">${esc(e.message || '')}</div>
+                <div class="event-time">${timeAgo(e.created_at)}</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    ` : ''}
+
+    <div class="detail-section">
+      <h4>Actions</h4>
+      <div class="detail-actions">
+        ${detail.status === 'active' && detail.activeWorker ? `
+          <button class="btn sm" onclick="pauseWorker('${detail.activeWorker.id}')">Pause Worker</button>
+          <button class="btn sm" onclick="showLogs('${detail.activeWorker.id}', '${esc(detail.name)}')">View Logs</button>
+          <button class="btn sm danger" onclick="stopWorker('${detail.activeWorker.id}')">Stop Worker</button>
+        ` : ''}
+        ${detail.status === 'paused' ? `
+          <button class="btn sm primary" onclick="resumeProject('${detail.id}')">Resume</button>
+        ` : ''}
+        ${detail.status === 'idle' ? `
+          <button class="btn sm primary" onclick="startWorker('${detail.id}', '${esc(detail.name)}')">Start Worker</button>
+        ` : ''}
+      </div>
+    </div>
+  `;
+}
+
+// ---- Actions ----
+async function pauseWorker(workerId) {
+  await fetch(`${API}/api/workers/${workerId}/pause`, { method: 'POST' });
+  refresh();
+}
+
+async function stopWorker(workerId) {
+  if (!confirm('Stop this worker permanently?')) return;
+  await fetch(`${API}/api/workers/${workerId}/stop`, { method: 'POST' });
+  refresh();
+}
+
+async function resumeProject(projectId) {
+  const prompt = window.prompt('Instructions (leave blank to continue):') || '';
+  await fetch(`${API}/api/projects/${projectId}/resume`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  });
+  refresh();
+}
+
+async function startWorker(projectId, name) {
+  const prompt = window.prompt(`What should Claude work on for ${name}?`);
+  if (!prompt) return;
+  await fetch(`${API}/api/workers`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ projectId, prompt, branch: 'main' }),
+  });
+  refresh();
+}
+
+async function sendMsg() {
+  const input = document.getElementById('msg-input');
+  const msg = input.value.trim();
+  if (!msg || !state.selectedProject) return;
+
+  const proj = state.projects.find(p => p.id === state.selectedProject);
+  if (!proj?.activeWorker) return;
+
+  await fetch(`${API}/api/workers/${proj.activeWorker.id}/message`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: msg }),
+  });
+  input.value = '';
+}
+
+async function showLogs(workerId, projectName) {
+  state.currentLogWorkerId = workerId;
+  document.getElementById('logs-title').textContent = `Logs — ${projectName}`;
+  document.getElementById('logs-modal').classList.add('open');
+  refreshLogs();
+}
+
+async function refreshLogs() {
+  if (!state.currentLogWorkerId) return;
+  try {
+    const res = await fetch(`${API}/api/workers/${state.currentLogWorkerId}/logs?lines=100`);
+    const data = await res.json();
+    const viewer = document.getElementById('logs-content');
+    if (data.output) {
+      viewer.innerHTML = data.output.split('\n').map(line => {
+        const cls = line.toLowerCase().includes('error') ? 'error' : line.toLowerCase().includes('warn') ? 'warn' : '';
+        return `<div class="log-line ${cls}">${esc(line)}</div>`;
+      }).join('');
+      viewer.scrollTop = viewer.scrollHeight;
+    } else {
+      viewer.textContent = '(no output yet)';
+    }
+  } catch (e) {
+    document.getElementById('logs-content').textContent = 'Error fetching logs';
+  }
+}
+
+function closeLogsModal() {
+  document.getElementById('logs-modal').classList.remove('open');
+  state.currentLogWorkerId = null;
+}
+
+// ---- Project Modal ----
+function openNewProjectModal() { document.getElementById('new-project-modal').classList.add('open'); }
+function closeModal() { document.getElementById('new-project-modal').classList.remove('open'); }
+
+async function createProject() {
+  const name = document.getElementById('np-name').value.trim();
+  const template = document.getElementById('np-template').value;
+  const description = document.getElementById('np-desc').value.trim();
+  const prompt = document.getElementById('np-prompt').value.trim();
+  if (!name) return alert('Name is required');
+
+  try {
+    const res = await fetch(`${API}/api/projects`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, template, description }),
+    });
+    const project = await res.json();
+    if (res.ok && prompt) {
+      await fetch(`${API}/api/workers`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: project.id, prompt, branch: 'main' }),
+      });
+    }
+    closeModal();
+    ['np-name', 'np-desc', 'np-prompt'].forEach(id => document.getElementById(id).value = '');
+    refresh();
+  } catch (e) { alert('Error creating project: ' + e.message); }
+}
+
+// ---- Sidebar ----
+function selectProject(id) {
+  state.selectedProject = id;
+  state.sidebarMode = 'detail';
+  document.getElementById('sidebar').classList.remove('hidden');
+  renderProjectDetail();
+  renderProjects(); // Update selected state
+}
+
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  if (sb.classList.contains('hidden')) {
+    sb.classList.remove('hidden');
+    state.sidebarMode = 'activity';
+    renderActivity();
+  } else {
+    sb.classList.add('hidden');
+  }
+}
+
+function closeSidebar() {
+  document.getElementById('sidebar').classList.add('hidden');
+  state.selectedProject = null;
+  renderProjects();
+}
+
+function setFilter(filter, el) {
+  state.currentFilter = filter;
+  document.querySelectorAll('.section-tabs .tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  renderProjects();
+}
+
+// ---- Helpers ----
+function esc(str) { const d = document.createElement('div'); d.textContent = str || ''; return d.innerHTML; }
+
+function formatUptime(seconds) {
+  if (!seconds) return '0m';
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function timeAgo(dateStr) {
+  if (!dateStr) return '';
+  const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+// ---- Refresh Loop ----
+async function refresh() {
+  await fetchData();
+  render();
+}
+
+// Close modals on overlay click
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) overlay.classList.remove('open');
+  });
+});
+
+// Init
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
