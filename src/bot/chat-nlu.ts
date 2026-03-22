@@ -236,7 +236,7 @@ export async function parseIntent(
 
   try {
     const response = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 500,
       system: SYSTEM_PROMPT,
       tools: FERAL_TOOLS,
@@ -260,10 +260,12 @@ export async function parseIntent(
     return { action, params, reply };
   } catch (err) {
     logger.error(`NLU parse failed: ${err}`);
+    // Return empty reply so project channels fall through to worker routing
+    // rather than showing an error message
     return {
       action: null,
       params: {},
-      reply: "Sorry, I had trouble understanding that. You can still use `!help` to see available commands.",
+      reply: "",
     };
   }
 }

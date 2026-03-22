@@ -4,7 +4,7 @@ import { config } from "../config.js";
 import { logger } from "../logger.js";
 import { ProjectManager } from "../managers/project-manager.js";
 import { WorkerManager } from "../managers/worker-manager.js";
-import { parseIntent, isNluAvailable } from "./chat-nlu.js";
+import { parseIntent, isNluAvailable } from "./chat-nlu.js"; // NLU used in team-manager only
 
 /**
  * Slack bot with two interfaces:
@@ -467,52 +467,9 @@ export class SlackBot {
         const project = this.projectManager.get(projectId);
         if (!project) return;
 
-        // If NLU is available, let Claude decide if this is a command or worker message
-        if (isNluAvailable()) {
-          try {
-            const worker = this.workerManager.getForProject(project.id);
-            const stateContext = worker
-              ? `Project "${project.name}" has an active worker on branch "${worker.branch}" (${worker.message_count} messages sent)`
-              : `Project "${project.name}" has no active worker (status: ${project.status})`;
-
-            const nlu = await parseIntent(text, {
-              currentProject: project.name,
-              stateContext,
-            });
-
-            if (nlu.action) {
-              // Claude identified a management action
-              try {
-                const result = await this.executeAction(nlu.action, nlu.params);
-                const response = nlu.reply ? `${nlu.reply}\n\n${result}` : result;
-                await say(response);
-              } catch (err) {
-                await say(`:x: ${err}`);
-              }
-            } else if (nlu.reply) {
-              // Claude just wants to chat (e.g., "thanks", "cool")
-              await say(nlu.reply);
-            } else {
-              // No action, no reply — treat as worker message
-              if (!worker) {
-                await say(`:warning: No active worker for *${project.name}*. Say "start working on..." to spin one up, or "resume" to pick up where you left off.`);
-                return;
-              }
-              try {
-                this.workerManager.sendMessage(worker.id, text);
-              } catch (err) {
-                await say(`:x: Failed to send to worker: ${err}`);
-              }
-            }
-          } catch (err) {
-            logger.error(`NLU failed, falling back to direct routing: ${err}`);
-            // Fall back to direct worker routing
-            this.routeToWorker(project.id, text, say);
-          }
-          return;
-        }
-
-        // No NLU — route directly to worker
+        // Project channels: all messages go directly to the worker.
+        // No NLU here — don't waste tokens on routing decisions.
+        // Use !commands for management actions (pause, stop, logs, etc.)
         this.routeToWorker(project.id, text, say);
         return;
       }
