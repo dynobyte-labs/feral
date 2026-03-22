@@ -34,7 +34,6 @@ export class SlackBot {
       token: config.slack.botToken,
       appToken: config.slack.appToken,
       socketMode: true,
-      signingSecret: config.slack.signingSecret,
     });
 
     this.client = new WebClient(config.slack.botToken);
@@ -63,8 +62,16 @@ export class SlackBot {
     if (!project) return null;
 
     try {
+      // Slack channel names: lowercase, numbers, hyphens only. Max 80 chars.
+      const safeName = `proj-${project.name}`
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 80);
+
       const result = await this.client.conversations.create({
-        name: `proj-${project.name}`,
+        name: safeName,
         is_private: false,
       });
 
@@ -300,7 +307,7 @@ export class SlackBot {
     // !help
     this.app.message(/^!help$/i, async ({ say }) => {
       await say([
-        ":book: *Claude Dev Farm Commands*",
+        ":book: *Feral Commands*",
         "",
         "`!new <name> [template] [description]` — Create a new project (templates: empty, web, api, ios, fullstack)",
         "`!start <project> <branch> <prompt>` — Start a worker on a project",

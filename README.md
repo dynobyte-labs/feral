@@ -61,16 +61,23 @@ cd feral
 npm install
 ```
 
-### 2. Configure
+### 2. Authenticate Claude Code
+
+```bash
+claude login
+```
+
+This uses your Claude Pro/Max subscription — Claude Code usage is included at no extra cost. This is the preferred method over API key auth, which bills per-token.
+
+### 3. Configure
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your keys:
+Edit `.env` with your keys (leave `ANTHROPIC_API_KEY` blank if you used `claude login`):
 
 ```env
-ANTHROPIC_API_KEY=sk-ant-...       # Required
 SLACK_BOT_TOKEN=xoxb-...           # For Slack integration
 SLACK_APP_TOKEN=xapp-...           # For Slack socket mode
 GITHUB_TOKEN=ghp_...               # For auto repo creation
