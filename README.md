@@ -281,16 +281,6 @@ The core idea: put nothing on the host machine that you'd be upset to lose.
 - **Firewall ON + stealth mode** — the setup script configures this automatically
 - **Reimageable in 30 minutes** — if anything goes wrong, factory reset and re-run `setup-macos.sh`
 
-### Credential Protection
-
-Feral includes a pre-commit hook that scans for accidentally staged secrets:
-
-```bash
-bash scripts/install-hooks.sh
-```
-
-This blocks commits containing Anthropic API keys, Slack tokens, GitHub PATs, OpenAI keys, private keys, and `.env` files. The `.gitignore` also excludes `.env`, `.pem`, `.key`, and the `data/` directory.
-
 ### What to Watch For
 
 **Exposed dashboard/API** — This is the #1 risk. Feral's API allows spawning workers, sending arbitrary commands, and accessing a full interactive terminal. If this is reachable from the internet, anyone can run arbitrary code on your machine. Always use Tailscale or another VPN. Never expose port 3000 publicly.
@@ -316,7 +306,7 @@ Before running Feral, verify:
 - [ ] The machine has no personal data, Apple ID, or browser logins
 - [ ] GitHub PAT is fine-grained and scoped to your org only
 - [ ] Anthropic API key is separate from your personal key
-- [ ] Pre-commit hooks are installed (`scripts/install-hooks.sh`)
+- [ ] Pre-commit hooks are installed (`bash scripts/install-hooks.sh`) — blocks commits containing leaked secrets
 - [ ] You're monitoring worker output for unexpected behavior
 
 ### Weekly Maintenance
