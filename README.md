@@ -38,7 +38,7 @@ Slack / Discord → Feral Orchestrator → Claude Code Workers → Your Repos
 
 ## Requirements
 
-- **macOS on Apple Silicon** (Mac Mini M4 recommended, any M-series works)
+- **macOS on Apple Silicon** (any Mac with an M-series chip — a Mac Mini works perfectly)
 - **Node.js 22+**
 - **Claude Code** installed globally (`npm install -g @anthropic-ai/claude-code`)
 - **Anthropic API key** (Pro or Max plan recommended for rate limits)
@@ -234,7 +234,7 @@ The dashboard, web terminal, and API all run on the same port (default 3000). **
 
 ## Dedicated Machine Setup
 
-For a dedicated always-on machine (Mac Mini M4 recommended):
+For a dedicated always-on machine (any Mac with an M-series chip):
 
 ```bash
 # Run the full macOS setup (Homebrew, Node, tmux, Tailscale, firewall, etc.)
@@ -271,7 +271,7 @@ Feral runs Claude Code with `--dangerously-skip-permissions`. That flag exists f
 
 ### The Expendable Machine Strategy
 
-The core idea: put nothing on outpost-1 that you'd be upset to lose.
+The core idea: put nothing on the host machine that you'd be upset to lose.
 
 - **No Apple ID signed in** — no iCloud, no Keychain sync
 - **No email, no browser logins, no personal data** — treat it like a server
