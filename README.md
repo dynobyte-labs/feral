@@ -228,7 +228,7 @@ The dashboard, web terminal, and API all run on the same port (default 3000). **
 - **Do not** use ngrok, Cloudflare Tunnel, or any reverse proxy to expose Feral to the internet
 - **Do not** put Feral behind a public load balancer or CDN
 - **Do not** forward port 3000 on your router
-- **Do not** bind to `0.0.0.0` on a machine with a public IP
+- **Do not** run Feral on a machine with a public IP without a firewall blocking port 3000 from the internet
 - **Do not** rely solely on `DASHBOARD_TOKEN` without a VPN — tokens can be brute-forced, leaked in logs, or stolen from browser history
 - **Do not** run Feral on a cloud VM with a public IP unless it's locked behind a VPN or security group with no public ingress
 
