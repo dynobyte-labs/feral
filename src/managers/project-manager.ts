@@ -6,6 +6,28 @@ import { config } from "../config.js";
 import { db, queries } from "../db/database.js";
 import { logger } from "../logger.js";
 
+/** Resolve full path to gh CLI — Node's PATH on macOS often misses /opt/homebrew/bin. */
+const GH_PATH = (() => {
+  for (const p of ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]) {
+    try {
+      execSync(`test -x "${p}"`, { stdio: "pipe" });
+      return p;
+    } catch { /* try next */ }
+  }
+  return "gh";
+})();
+
+/** Resolve full path to git — same PATH issue. */
+const GIT_PATH = (() => {
+  for (const p of ["/opt/homebrew/bin/git", "/usr/local/bin/git", "/usr/bin/git"]) {
+    try {
+      execSync(`test -x "${p}"`, { stdio: "pipe" });
+      return p;
+    } catch { /* try next */ }
+  }
+  return "git";
+})();
+
 export type ProjectTemplate = "empty" | "web" | "api" | "ios" | "fullstack";
 
 export interface Project {
@@ -117,7 +139,7 @@ export class ProjectManager {
     fs.writeFileSync(path.join(projectPath, "PROJECT_BRIEF.md"), brief);
 
     // Step 2: Git init + initial commit
-    execSync("git init && git add -A && git commit -m 'Initial scaffold'", {
+    execSync(`${GIT_PATH} init && ${GIT_PATH} add -A && ${GIT_PATH} commit -m 'Initial scaffold'`, {
       cwd: projectPath,
       stdio: "pipe",
     });
@@ -128,17 +150,19 @@ export class ProjectManager {
     if (config.github.enabled && !options.skipGithub) {
       try {
         const orgFlag = config.github.org ? `--org ${config.github.org}` : "";
+        const ghEnv = { ...process.env, GH_TOKEN: config.github.token, PATH: `${process.env.PATH}:/opt/homebrew/bin:/usr/local/bin` };
         execSync(
-          `gh repo create ${name} --private ${orgFlag} --source=. --push`,
-          { cwd: projectPath, stdio: "pipe", env: { ...process.env, GH_TOKEN: config.github.token } }
+          `${GH_PATH} repo create ${name} --private ${orgFlag} --source=. --push`,
+          { cwd: projectPath, stdio: "pipe", env: ghEnv }
         );
-        const remote = execSync("git remote get-url origin", {
+        const remote = execSync(`${GIT_PATH} remote get-url origin`, {
           cwd: projectPath, encoding: "utf-8",
         }).trim();
         repoUrl = remote;
         logger.info(`GitHub repo created: ${repoUrl}`);
-      } catch (err) {
-        logger.warn(`Failed to create GitHub repo (continuing without): ${err}`);
+      } catch (err: any) {
+        const stderr = err.stderr?.toString() || err.message || String(err);
+        logger.warn(`Failed to create GitHub repo (continuing without): ${stderr}`);
       }
     }
 
