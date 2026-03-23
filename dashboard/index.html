@@ -298,6 +298,7 @@
   </div>
   <div class="topbar-right">
     <button class="btn primary" onclick="openNewProjectModal()">+ New Project</button>
+    <a href="/terminal" class="btn-icon" title="Web Terminal" style="text-decoration:none;">&#x2328;</a>
     <button class="btn-icon" onclick="refresh()" title="Refresh">&#x21bb;</button>
     <button class="btn-icon" onclick="toggleSidebar()" title="Toggle Activity" id="sidebar-toggle">&#x25e8;</button>
   </div>
@@ -562,6 +563,7 @@ function renderProjects() {
           <span class="card-meta">${timeAgo(p.updated_at)}</span>
           <div class="card-actions" onclick="event.stopPropagation()">
             ${p.status === 'active' && w ? `
+              <a class="btn sm" href="/terminal?project=${encodeURIComponent(p.name)}" title="Open terminal">&#x2328; Terminal</a>
               <button class="btn sm" onclick="pauseWorker('${w.id}')">Pause</button>
               <button class="btn sm" onclick="showLogs('${w.id}', '${esc(p.name)}')">Logs</button>
             ` : ''}

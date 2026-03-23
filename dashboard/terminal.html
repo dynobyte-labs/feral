@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Feral — Terminal</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/xterm.min.css">
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0b0d14; --surface: #161a25; --surface2: #1c2130;
+    --border: #2a3045; --text: #e4e7f0; --text2: #c0c5d4; --muted: #7b82a0;
+    --accent: #6c7cff; --green: #34d399; --red: #f87171; --orange: #f59e0b;
+    --radius: 12px; --radius-sm: 8px;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column;
+  }
+
+  /* Top bar */
+  .topbar {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 10px 20px; display: flex; align-items: center; gap: 16px;
+    flex-shrink: 0;
+  }
+  .topbar a { color: var(--accent); text-decoration: none; font-size: 14px; }
+  .topbar a:hover { text-decoration: underline; }
+  .logo { font-size: 18px; font-weight: 700; color: var(--accent); }
+  .logo span { color: var(--text); font-weight: 400; }
+  .sep { color: var(--muted); }
+  .project-name { font-weight: 600; font-size: 15px; }
+
+  .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+  .status-badge {
+    padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .status-badge.connected { background: rgba(52,211,153,0.12); color: var(--green); }
+  .status-badge.disconnected { background: rgba(248,113,113,0.12); color: var(--red); }
+  .status-badge.connecting { background: rgba(245,158,11,0.12); color: var(--orange); }
+
+  select {
+    background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 6px 12px; font-size: 13px;
+    cursor: pointer; outline: none;
+  }
+  select:hover { border-color: var(--accent); }
+
+  /* Terminal container */
+  .terminal-wrap {
+    flex: 1; padding: 8px; overflow: hidden;
+  }
+  #terminal { height: 100%; }
+
+  /* Error overlay */
+  .error-overlay {
+    display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 32px 40px; text-align: center; max-width: 480px;
+  }
+  .error-overlay.visible { display: block; }
+  .error-overlay h3 { font-size: 16px; margin-bottom: 8px; }
+  .error-overlay p { color: var(--muted); font-size: 13px; line-height: 1.5; }
+  .error-overlay button {
+    margin-top: 16px; padding: 8px 20px; border-radius: var(--radius-sm);
+    border: 1px solid var(--accent); background: rgba(108,124,255,0.12);
+    color: var(--accent); font-size: 13px; cursor: pointer;
+  }
+  .error-overlay button:hover { background: rgba(108,124,255,0.2); }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <a href="/">← Dashboard</a>
+    <span class="sep">|</span>
+    <span class="logo">feral<span> terminal</span></span>
+    <span class="sep">|</span>
+    <select id="projectSelect"><option value="">Loading projects...</option></select>
+    <div class="topbar-right">
+      <span id="statusBadge" class="status-badge connecting">Connecting</span>
+    </div>
+  </div>
+
+  <div class="terminal-wrap" style="position: relative;">
+    <div id="terminal"></div>
+    <div id="errorOverlay" class="error-overlay">
+      <h3 id="errorTitle">Not Connected</h3>
+      <p id="errorMessage">Select a project to connect to its terminal.</p>
+      <button onclick="reconnect()">Reconnect</button>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/xterm.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/addons/xterm-addon-fit.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/addons/xterm-addon-web-links.min.js"></script>
+  <script>
+    const term = new Terminal({
+      theme: {
+        background: '#0b0d14',
+        foreground: '#e4e7f0',
+        cursor: '#6c7cff',
+        cursorAccent: '#0b0d14',
+        selectionBackground: 'rgba(108,124,255,0.3)',
+        black: '#1c2130',
+        red: '#f87171',
+        green: '#34d399',
+        yellow: '#f59e0b',
+        blue: '#6c7cff',
+        magenta: '#a78bfa',
+        cyan: '#22d3ee',
+        white: '#e4e7f0',
+        brightBlack: '#7b82a0',
+        brightRed: '#fca5a5',
+        brightGreen: '#6ee7b7',
+        brightYellow: '#fcd34d',
+        brightBlue: '#93a3ff',
+        brightMagenta: '#c4b5fd',
+        brightCyan: '#67e8f9',
+        brightWhite: '#f8fafc',
+      },
+      fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', 'Menlo', monospace",
+      fontSize: 13,
+      lineHeight: 1.2,
+      cursorBlink: true,
+      cursorStyle: 'bar',
+      scrollback: 10000,
+    });
+
+    const fitAddon = new FitAddon.FitAddon();
+    const webLinksAddon = new WebLinksAddon.WebLinksAddon();
+    term.loadAddon(fitAddon);
+    term.loadAddon(webLinksAddon);
+    term.open(document.getElementById('terminal'));
+    fitAddon.fit();
+
+    let ws = null;
+    let currentProject = null;
+
+    const statusBadge = document.getElementById('statusBadge');
+    const errorOverlay = document.getElementById('errorOverlay');
+    const errorTitle = document.getElementById('errorTitle');
+    const errorMessage = document.getElementById('errorMessage');
+    const projectSelect = document.getElementById('projectSelect');
+
+    function setStatus(status) {
+      statusBadge.className = `status-badge ${status}`;
+      statusBadge.textContent = status === 'connected' ? 'Connected'
+        : status === 'connecting' ? 'Connecting...'
+        : 'Disconnected';
+    }
+
+    function showError(title, message) {
+      errorTitle.textContent = title;
+      errorMessage.textContent = message;
+      errorOverlay.classList.add('visible');
+    }
+
+    function hideError() {
+      errorOverlay.classList.remove('visible');
+    }
+
+    // Load project list
+    async function loadProjects() {
+      try {
+        const res = await fetch('/api/projects');
+        const projects = await res.json();
+
+        projectSelect.innerHTML = '<option value="">Select a project...</option>';
+        for (const p of projects) {
+          const opt = document.createElement('option');
+          opt.value = p.name;
+          const status = p.activeWorker ? '● ' : '○ ';
+          opt.textContent = status + p.name;
+          projectSelect.appendChild(opt);
+        }
+
+        // Auto-select from URL param
+        const params = new URLSearchParams(window.location.search);
+        const projectFromUrl = params.get('project');
+        if (projectFromUrl) {
+          projectSelect.value = projectFromUrl;
+          connect(projectFromUrl);
+        }
+      } catch (err) {
+        console.error('Failed to load projects:', err);
+      }
+    }
+
+    function connect(projectName) {
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+
+      if (!projectName) {
+        setStatus('disconnected');
+        showError('No Project Selected', 'Select a project from the dropdown to connect to its terminal.');
+        return;
+      }
+
+      currentProject = projectName;
+      term.clear();
+      setStatus('connecting');
+      hideError();
+
+      // Update URL
+      const url = new URL(window.location);
+      url.searchParams.set('project', projectName);
+      history.replaceState(null, '', url);
+
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${protocol}//${window.location.host}/ws/terminal?project=${encodeURIComponent(projectName)}`);
+
+      ws.onopen = () => {
+        setStatus('connected');
+        hideError();
+        term.focus();
+
+        // Send initial size
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+      };
+
+      ws.onmessage = (event) => {
+        // Check for JSON error messages
+        if (typeof event.data === 'string' && event.data.startsWith('{')) {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.error) {
+              setStatus('disconnected');
+              showError('Connection Failed', msg.error);
+              return;
+            }
+          } catch {
+            // Not JSON — terminal data
+          }
+        }
+        term.write(event.data);
+      };
+
+      ws.onclose = () => {
+        setStatus('disconnected');
+      };
+
+      ws.onerror = (err) => {
+        setStatus('disconnected');
+        showError('Connection Error', 'Could not connect to the terminal server. Is Feral running?');
+      };
+    }
+
+    function reconnect() {
+      if (currentProject) {
+        connect(currentProject);
+      }
+    }
+
+    // Input handling
+    term.onData((data) => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(data);
+      }
+    });
+
+    // Resize handling
+    window.addEventListener('resize', () => {
+      fitAddon.fit();
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+      }
+    });
+
+    // Project selector
+    projectSelect.addEventListener('change', (e) => {
+      connect(e.target.value);
+    });
+
+    // Init
+    loadProjects();
+    showError('No Project Selected', 'Select a project from the dropdown to connect to its terminal.');
+    setStatus('disconnected');
+  </script>
+</body>
+</html>

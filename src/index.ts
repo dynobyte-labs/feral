@@ -6,9 +6,11 @@ import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { ProjectManager } from "./managers/project-manager.js";
 import { WorkerManager } from "./managers/worker-manager.js";
+import { createServer } from "http";
 import { SlackBot } from "./bot/slack-bot.js";
 import { DiscordBot } from "./bot/discord-bot.js";
 import { createRouter } from "./api/routes.js";
+import { attachTerminalServer } from "./terminal/terminal-server.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -33,6 +35,12 @@ async function main() {
   // Serve dashboard static files
   const dashboardPath = path.join(__dirname, "..", "dashboard");
   app.use(express.static(dashboardPath));
+
+  // Terminal page gets its own route (before the wildcard)
+  app.get("/terminal", (_req, res) => {
+    res.sendFile(path.join(dashboardPath, "terminal.html"));
+  });
+
   app.get("*", (_req, res) => {
     res.sendFile(path.join(dashboardPath, "index.html"));
   });
@@ -54,8 +62,15 @@ async function main() {
     // Don't exit — keep the server running
   });
 
-  app.listen(config.port, () => {
+  // Use HTTP server so WebSocket can share the same port
+  const server = createServer(app);
+
+  // Attach web terminal WebSocket server
+  attachTerminalServer(server, projectManager, workerManager);
+
+  server.listen(config.port, () => {
     logger.info(`Dashboard: http://localhost:${config.port}`);
+    logger.info(`Terminal: http://localhost:${config.port}/terminal`);
   });
 
   // Start chat integrations (non-fatal — server works without them)
