@@ -167,9 +167,31 @@ export function attachTerminalServer(
     if (!usedPty) {
       // Polling mode — uses tmux capture-pane for output and send-keys for input.
       // No PTY needed. Works on any system with tmux.
+      // We render by positioning each line explicitly with ANSI cursor commands.
       let lastContent = "";
       let cols = 200;
       let rows = 50;
+
+      /** Render captured pane content with proper ANSI cursor positioning. */
+      function renderPane(content: string): string {
+        const lines = content.split("\n");
+        // Move cursor home, then position each line explicitly
+        let out = "\x1b[H"; // cursor to 1,1
+        for (let i = 0; i < lines.length; i++) {
+          // Move to row i+1, column 1; clear the line; write content
+          out += `\x1b[${i + 1};1H\x1b[2K${lines[i]}`;
+        }
+        // Clear any remaining lines below (in case screen shrunk)
+        out += `\x1b[${lines.length + 1};1H\x1b[J`;
+        return out;
+      }
+
+      // Resize the tmux pane to match the browser terminal
+      function resizePane() {
+        try {
+          execSync(`${TMUX_PATH} resize-window -t "${tmuxSession}" -x ${cols} -y ${rows}`, { stdio: "pipe" });
+        } catch { /* ignore */ }
+      }
 
       // Send initial screen content
       try {
@@ -178,7 +200,7 @@ export function attachTerminalServer(
           { encoding: "utf-8", maxBuffer: 1024 * 1024 },
         );
         if (initial) {
-          ws.send(initial);
+          ws.send(renderPane(initial));
           lastContent = initial;
         }
       } catch { /* ignore */ }
@@ -205,8 +227,7 @@ export function attachTerminalServer(
           );
 
           if (content !== lastContent) {
-            // Clear screen and redraw — simplest way to sync state
-            ws.send("\x1b[2J\x1b[H" + content);
+            ws.send(renderPane(content));
             lastContent = content;
           }
         } catch {
