@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { config } from "../config.js";
 import { ProjectManager } from "../managers/project-manager.js";
 import { WorkerManager } from "../managers/worker-manager.js";
 
@@ -43,8 +44,7 @@ export function createRouter(
   // ---- Workers ----
 
   router.get("/api/workers", (_req: Request, res: Response) => {
-    const active = workerManager.listActive();
-    const all = workerManager.listAll ? workerManager.listAll() : active;
+    const all = workerManager.listAll();
     res.json(all);
   });
 
@@ -116,7 +116,7 @@ export function createRouter(
       uptime: process.uptime(),
       projects: projects.length,
       activeWorkers: active.length,
-      maxWorkers: parseInt(process.env.MAX_WORKERS || "4"),
+      maxWorkers: config.maxWorkers,
       pausedProjects: projects.filter((p) => p.status === "paused").length,
       totalMessages: active.reduce((sum, w) => sum + (w.message_count || 0), 0),
     });

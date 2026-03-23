@@ -20,6 +20,9 @@ async function main() {
   const projectManager = new ProjectManager();
   const workerManager = new WorkerManager(projectManager);
 
+  // Start worker health checks (detects dead tmux sessions)
+  workerManager.startHealthCheck();
+
   // Start Express server
   const app = express();
   app.use(cors());
@@ -37,13 +40,25 @@ async function main() {
     logger.info(`Dashboard: http://localhost:${config.port}`);
   });
 
-  // Start Slack bot
-  const slackBot = new SlackBot(projectManager, workerManager);
-  await slackBot.start();
+  // Start Slack bot (non-fatal — server works without Slack)
+  try {
+    const slackBot = new SlackBot(projectManager, workerManager);
+    await slackBot.start();
+  } catch (err) {
+    if (config.slack.enabled) {
+      logger.error(`Slack bot failed to start: ${err}`);
+      logger.error("Feral will continue running without Slack integration.");
+    } else {
+      logger.info("Slack not configured — running without Slack integration.");
+    }
+  }
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     logger.info(`${signal} received. Shutting down gracefully...`);
+
+    workerManager.stopOutputPolling();
+    workerManager.stopHealthCheck();
 
     // Pause all active workers (preserves state)
     const active = workerManager.listActive();

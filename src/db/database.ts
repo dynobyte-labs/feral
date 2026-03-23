@@ -108,6 +108,12 @@ export const queries = {
   getLastWorkerForProject: db.prepare(`
     SELECT * FROM workers WHERE project_id = ? ORDER BY started_at DESC LIMIT 1
   `),
+  listAllWorkers: db.prepare(`
+    SELECT w.*, p.name as project_name FROM workers w
+    JOIN projects p ON w.project_id = p.id
+    ORDER BY w.started_at DESC
+    LIMIT 100
+  `),
 
   // Project briefs
   upsertBrief: db.prepare(`
