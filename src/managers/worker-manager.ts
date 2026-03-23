@@ -95,15 +95,17 @@ export class WorkerManager {
   /**
    * Wait for the tmux pane to show signs that Claude is ready for input.
    * Returns true if ready, false if timed out.
+   *
+   * Claude Code v2.1+ uses ❯ as its input prompt character.
+   * The status bar "bypass permissions on" also indicates readiness.
    */
-  private async waitForReady(sessionName: string, timeoutMs = 5000): Promise<boolean> {
+  private async waitForReady(sessionName: string, timeoutMs = 8000): Promise<boolean> {
     const start = Date.now();
     const interval = 500;
 
     while (Date.now() - start < timeoutMs) {
       const pane = this.tmuxCapture(sessionName, 30);
-      // Claude Code shows box-drawing characters or ">" when ready
-      if (/[╭╰>]\s*$/m.test(pane) || /What can I help|What would you like|Tip:/i.test(pane)) {
+      if (/❯/.test(pane) || /bypass permissions on/i.test(pane)) {
         return true;
       }
       await new Promise(r => setTimeout(r, interval));
@@ -116,8 +118,35 @@ export class WorkerManager {
   // ---------------------------------------------------------------------------
 
   /**
+   * Strip Claude Code TUI chrome from captured pane content.
+   * Removes status bars, box-drawing decorations, and other non-content lines
+   * so only meaningful output is forwarded to Slack.
+   */
+  private stripTuiChrome(text: string): string {
+    return text
+      .split("\n")
+      .filter(line => {
+        const trimmed = line.trim();
+        // Skip empty lines
+        if (!trimmed) return false;
+        // Skip status bar lines
+        if (/⏵⏵|bypass permissions|shift\+tab|esc to interrupt/i.test(trimmed)) return false;
+        // Skip lines that are only box-drawing / decoration
+        if (/^[╭╰╮╯│─┌┐└┘├┤┬┴┼═║╔╗╚╝╠╣╦╩╬\s─]+$/.test(trimmed)) return false;
+        // Skip the bare prompt character
+        if (/^❯\s*$/.test(trimmed)) return false;
+        // Skip effort/mode indicators
+        if (/^◐|medium\s*·\s*\/effort/i.test(trimmed)) return false;
+        return true;
+      })
+      .join("\n")
+      .trim();
+  }
+
+  /**
    * Start polling active workers for new output.
    * Calls onOutput(projectId, newText) whenever a worker produces new content.
+   * Filters out TUI chrome (status bars, box decorations) before forwarding.
    */
   startOutputPolling(onOutput: (projectId: string, text: string) => void, intervalMs = 3000): void {
     if (this.pollInterval) return;
@@ -132,17 +161,25 @@ export class WorkerManager {
           const tmuxSession = `feral-${project.name}`;
           if (!this.tmuxSessionExists(tmuxSession)) continue;
 
-          const current = this.tmuxCapture(tmuxSession);
-          if (!current) continue;
+          const rawCapture = this.tmuxCapture(tmuxSession);
+          if (!rawCapture) continue;
 
-          const last = this.lastOutput.get(worker.id) ?? "";
+          // Compare raw captures to detect any change
+          const lastRaw = this.lastOutput.get(worker.id) ?? "";
+          if (rawCapture === lastRaw) continue;
 
-          if (current !== last) {
-            const newContent = current.length > last.length
-              ? current.slice(last.length).trim()
-              : current.trim();
+          // Strip TUI chrome from both old and new, then diff
+          const currentClean = this.stripTuiChrome(rawCapture);
+          const lastClean = this.stripTuiChrome(lastRaw);
 
-            this.lastOutput.set(worker.id, current);
+          this.lastOutput.set(worker.id, rawCapture);
+
+          if (currentClean !== lastClean && currentClean.length > 0) {
+            // Extract only the new portion
+            const newContent = currentClean.length > lastClean.length
+              ? currentClean.slice(lastClean.length).trim()
+              : currentClean.trim();
+
             if (newContent.length > 0) {
               onOutput(worker.project_id, newContent);
             }

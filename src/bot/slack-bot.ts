@@ -519,17 +519,37 @@ export class SlackBot {
 
   /**
    * Direct routing: send message to a project's active worker.
+   * If the worker is still starting up, waits briefly for it to become ready.
    */
   private async routeToWorker(
     projectId: string,
     text: string,
     say: (msg: string) => Promise<unknown>
   ): Promise<void> {
-    const worker = this.workerManager.getForProject(projectId);
+    let worker = this.workerManager.getForProject(projectId);
     if (!worker) {
       await say(":warning: No active worker for this project. Use `!resume` to start one.");
       return;
     }
+
+    // If worker is still starting, wait up to 20s for it to become "running"
+    if (worker.status === "starting") {
+      const maxWait = 20;
+      for (let i = 0; i < maxWait; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        worker = this.workerManager.getForProject(projectId);
+        if (!worker || worker.status !== "starting") break;
+      }
+      if (!worker || worker.status === "starting") {
+        await say(":hourglass: Worker is still starting up — try again in a few seconds.");
+        return;
+      }
+      if (worker.status !== "running") {
+        await say(`:warning: Worker failed to start (status: ${worker.status}). Check logs.`);
+        return;
+      }
+    }
+
     try {
       this.workerManager.sendMessage(worker.id, text);
     } catch (err) {

@@ -1,8 +1,13 @@
 #!/bin/bash
 # =============================================================================
 # Feral worker startup script.
-# Launches Claude Code in a tmux session, auto-accepts all startup prompts,
+# Launches Claude Code in a tmux session, auto-accepts genuine startup prompts,
 # and waits until Claude is ready for input before exiting.
+#
+# IMPORTANT: Claude Code v2.1+ has a rich TUI with a status bar that reads:
+#   "⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt"
+# This is NOT a prompt — it's a persistent status indicator. We must not
+# interact with it. Real prompts are full-screen dialogs that block startup.
 #
 # Usage: bash scripts/start-worker.sh <session-name> <work-dir>
 # Exit codes:
@@ -27,7 +32,8 @@ tmux kill-session -t "$SESSION" 2>/dev/null || true
 sleep 0.5
 
 # Start a new detached tmux session running claude
-# Set a larger history limit so capture-pane has more to work with
+# Set a larger history limit so capture-pane has more to work with.
+# The trailing `sleep` keeps the session alive if claude exits so we can read errors.
 tmux new-session -d -s "$SESSION" -c "$WORK_DIR" -x 200 -y 50 \
   "claude --dangerously-skip-permissions 2>&1; echo '___FERAL_CLAUDE_EXITED___'; sleep 86400"
 
@@ -50,13 +56,26 @@ send_keys() {
   tmux send-keys -t "$SESSION" "$@"
 }
 
-# Wait for Claude to fully load, answering prompts as they appear.
-# Claude Code shows various prompts during startup depending on config.
-# We need to handle: trust prompt, API key prompt, dangerous mode confirmation.
-# When ready, Claude shows a text input area or ">" prompt.
+# ---------------------------------------------------------------------------
+# Wait for Claude to become ready.
+#
+# Claude Code v2.1+ startup sequence:
+#   1. Brief loading/spinner
+#   2. Possibly: trust prompt ("Do you trust the files in this folder?")
+#      - This is a BLOCKING dialog with numbered options
+#   3. Possibly: login/API key prompt (blocking)
+#   4. Welcome banner appears (box-drawing ╭╰, "Welcome back", etc.)
+#   5. Input prompt: ❯  (this is the ready signal)
+#   6. Status bar at bottom: "⏵⏵ bypass permissions on (shift+tab to cycle)"
+#      THIS IS NOT A PROMPT — never interact with it!
+#
+# The key insight: we only need to detect (and respond to) blocking dialogs
+# that prevent Claude from reaching the ❯ prompt. Once we see ❯, we're done.
+# ---------------------------------------------------------------------------
 
 MAX_WAIT=30
 READY=false
+TRUST_HANDLED=false
 LAST_PANE=""
 
 for i in $(seq 1 $MAX_WAIT); do
@@ -64,7 +83,7 @@ for i in $(seq 1 $MAX_WAIT); do
 
   PANE=$(capture_pane)
 
-  # Skip if pane hasn't changed and it's early (still loading)
+  # Skip if nothing has changed yet
   if [ "$PANE" = "$LAST_PANE" ] && [ $i -lt 5 ]; then
     continue
   fi
@@ -78,71 +97,55 @@ for i in $(seq 1 $MAX_WAIT); do
     exit 3
   fi
 
-  # Trust prompt: "Do you trust the files in this folder?" or similar
-  # Usually shows numbered options — send "1" to trust
-  if echo "$PANE" | grep -qi "trust.*files\|trust.*folder\|Do you trust"; then
-    echo "  [$i] Answering trust prompt (selecting option 1)..."
-    send_keys "1" Enter
-    sleep 2
-    continue
-  fi
-
-  # API key / login prompt
-  if echo "$PANE" | grep -qi "API key\|api.key\|Enter.*key\|login\|authenticate"; then
-    echo "  [$i] Dismissing API/login prompt..."
-    send_keys Enter
-    sleep 2
-    continue
-  fi
-
-  # Dangerous mode / permissions confirmation
-  if echo "$PANE" | grep -qi "bypass\|dangerous\|skip-perm\|permission.*skip\|confirm.*dangerous"; then
-    echo "  [$i] Confirming dangerous mode..."
-    send_keys Enter
-    sleep 2
-    continue
-  fi
-
-  # Terms / agreement prompt
-  if echo "$PANE" | grep -qi "terms\|agree\|accept\|license"; then
-    echo "  [$i] Accepting terms..."
-    send_keys "y" Enter
-    sleep 2
-    continue
-  fi
-
-  # Check if Claude is ready — look for the input prompt
-  # Claude Code shows ">" or "╭" (box drawing) or "What can I help" or similar
-  if echo "$PANE" | grep -qE '>\s*$|╭|╰|What can I help|What would you like|Tip:|waiting for input|human turn'; then
-    echo "  [$i] Claude is ready."
+  # -------------------------------------------------------------------------
+  # CHECK FOR READY STATE FIRST (most common path after first startup)
+  # The ❯ character is Claude Code's input prompt. When it appears on its
+  # own line (possibly with whitespace), Claude is ready for input.
+  # Also check for the "bypass permissions on" status bar — this only
+  # appears once Claude is fully loaded and in dangerous mode.
+  # -------------------------------------------------------------------------
+  if echo "$PANE" | grep -qE '❯|bypass permissions on'; then
+    echo "  [$i] Claude is ready (input prompt detected)."
     READY=true
     break
   fi
 
-  # Also check: if we're past 10 seconds and pane has content but no known prompt,
-  # Claude might be ready with an unfamiliar prompt style
-  if [ $i -ge 15 ] && [ -n "$PANE" ]; then
-    # Check if the last line looks like an input prompt (ends with cursor-like characters)
-    LAST_LINE=$(echo "$PANE" | grep -v '^$' | tail -1)
-    if echo "$LAST_LINE" | grep -qE '^\s*[>$%#]|^\s*claude|input'; then
-      echo "  [$i] Claude appears ready (prompt detected: $LAST_LINE)"
-      READY=true
-      break
-    fi
+  # -------------------------------------------------------------------------
+  # BLOCKING PROMPT: Trust dialog
+  # Shows "Do you trust the files in this folder?" with numbered options.
+  # Only handle this once to avoid re-triggering on stale pane content.
+  # -------------------------------------------------------------------------
+  if [ "$TRUST_HANDLED" = false ] && echo "$PANE" | grep -qi "Do you trust"; then
+    echo "  [$i] Answering trust prompt (selecting option 1)..."
+    send_keys "1" Enter
+    TRUST_HANDLED=true
+    sleep 2
+    continue
   fi
 
-  echo "  [$i] Waiting... ($(echo "$PANE" | wc -l | tr -d ' ') lines in pane)"
+  # -------------------------------------------------------------------------
+  # BLOCKING PROMPT: Login / API key
+  # Only match explicit "Enter your API key" or "Please log in" prompts,
+  # NOT the status bar or welcome text that might mention "API".
+  # -------------------------------------------------------------------------
+  if echo "$PANE" | grep -qi "Enter your API key\|Please log in\|Login required\|No API key found"; then
+    echo "  [$i] Dismissing login/API key prompt..."
+    send_keys Enter
+    sleep 2
+    continue
+  fi
+
+  echo "  [$i] Waiting... ($(echo "$PANE" | grep -cv '^$') non-empty lines in pane)"
 done
 
 if [ "$READY" = true ]; then
   echo "Claude is ready in tmux session '$SESSION'."
   exit 0
 else
-  # Even if we timed out, check if the session is alive — Claude might just have
-  # a different prompt style than we expected
+  # Even if we timed out, check if the session is alive
   if tmux has-session -t "$SESSION" 2>/dev/null; then
     echo "WARNING: Timed out waiting for Claude ready signal, but session '$SESSION' is alive."
-    echo "--- Last pane content ---"
+    echo "--- Last pane content (last 10 lines) ---"
     capture_pane | tail -10
     echo "---"
     echo "Proceeding anyway (session exists)."
