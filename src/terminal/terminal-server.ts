@@ -41,9 +41,21 @@ interface TerminalSession {
 
 const activeSessions: Map<WebSocket, TerminalSession> = new Map();
 
+/** Resolve the full path to tmux — node-pty needs it because Node's PATH is often stripped on macOS. */
+const TMUX_PATH = (() => {
+  for (const p of ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]) {
+    try {
+      execSync(`test -x "${p}"`, { stdio: "pipe" });
+      return p;
+    } catch { /* try next */ }
+  }
+  // Fall back to bare "tmux" and hope it's in PATH
+  return "tmux";
+})();
+
 function tmuxSessionExists(sessionName: string): boolean {
   try {
-    execSync(`tmux has-session -t "${sessionName}" 2>/dev/null`, { stdio: "pipe" });
+    execSync(`${TMUX_PATH} has-session -t "${sessionName}" 2>/dev/null`, { stdio: "pipe" });
     return true;
   } catch {
     return false;
@@ -102,57 +114,57 @@ export function attachTerminalServer(
 
     logger.info(`Web terminal connected: ${projectName}`);
 
+    // Try full PTY mode first, fall back to polling
+    let usedPty = false;
+
     if (ptySpawn) {
-      // Full PTY mode — proper terminal emulation
-      logger.info(`Spawning PTY: tmux attach-session -d -t ${tmuxSession}`);
-      const pty = ptySpawn("tmux", ["attach-session", "-d", "-t", tmuxSession], {
-        name: "xterm-256color",
-        cols: 200,
-        rows: 50,
-        env: { ...process.env, TERM: "xterm-256color" } as Record<string, string>,
-      });
-      logger.info(`PTY spawned (pid: ${pty.pid})`);
+      logger.info(`Spawning PTY: ${TMUX_PATH} attach-session -d -t ${tmuxSession}`);
+      try {
+        const pty = ptySpawn(TMUX_PATH, ["attach-session", "-d", "-t", tmuxSession], {
+          name: "xterm-256color",
+          cols: 200,
+          rows: 50,
+          env: { ...process.env, TERM: "xterm-256color" } as Record<string, string>,
+        });
+        logger.info(`PTY spawned (pid: ${pty.pid})`);
+        usedPty = true;
 
-      const session: TerminalSession = { projectId: project.id, projectName: project.name, pty, ws };
-      activeSessions.set(ws, session);
+        const session: TerminalSession = { projectId: project.id, projectName: project.name, pty, ws };
+        activeSessions.set(ws, session);
 
-      pty.onData((data: string) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(data);
-        }
-      });
-
-      pty.onExit(({ exitCode }: { exitCode: number }) => {
-        logger.info(`Web terminal PTY exited: ${projectName} (code: ${exitCode})`);
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send("\r\n\x1b[33m[Terminal session ended]\x1b[0m\r\n");
-          ws.close();
-        }
-      });
-
-      // Catch spawn errors
-      pty.on?.("error", (err: Error) => {
-        logger.error(`PTY error for ${projectName}: ${err.message}`);
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ error: `Terminal error: ${err.message}` }));
-          ws.close();
-        }
-      });
-
-      ws.on("message", (data) => {
-        const msg = data.toString();
-        try {
-          const parsed = JSON.parse(msg);
-          if (parsed.type === "resize" && parsed.cols && parsed.rows) {
-            pty.resize(parsed.cols, parsed.rows);
-            return;
+        pty.onData((data: string) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(data);
           }
-        } catch {
-          // Not JSON — regular input
-        }
-        pty.write(msg);
-      });
-    } else {
+        });
+
+        pty.onExit(({ exitCode }: { exitCode: number }) => {
+          logger.info(`Web terminal PTY exited: ${projectName} (code: ${exitCode})`);
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send("\r\n\x1b[33m[Terminal session ended]\x1b[0m\r\n");
+            ws.close();
+          }
+        });
+
+        ws.on("message", (data) => {
+          const msg = data.toString();
+          try {
+            const parsed = JSON.parse(msg);
+            if (parsed.type === "resize" && parsed.cols && parsed.rows) {
+              pty.resize(parsed.cols, parsed.rows);
+              return;
+            }
+          } catch {
+            // Not JSON — regular input
+          }
+          pty.write(msg);
+        });
+      } catch (err) {
+        logger.error(`PTY spawn failed: ${err} — falling back to polling mode`);
+      }
+    }
+
+    if (!usedPty) {
       // Polling mode — uses tmux capture-pane for output and send-keys for input.
       // No PTY needed. Works on any system with tmux.
       let lastContent = "";
@@ -162,7 +174,7 @@ export function attachTerminalServer(
       // Send initial screen content
       try {
         const initial = execSync(
-          `tmux capture-pane -t "${tmuxSession}" -p -e`,
+          `${TMUX_PATH} capture-pane -t "${tmuxSession}" -p -e`,
           { encoding: "utf-8", maxBuffer: 1024 * 1024 },
         );
         if (initial) {
@@ -188,7 +200,7 @@ export function attachTerminalServer(
 
         try {
           const content = execSync(
-            `tmux capture-pane -t "${tmuxSession}" -p -e`,
+            `${TMUX_PATH} capture-pane -t "${tmuxSession}" -p -e`,
             { encoding: "utf-8", maxBuffer: 1024 * 1024 },
           );
 
@@ -213,7 +225,7 @@ export function attachTerminalServer(
             cols = parsed.cols;
             rows = parsed.rows;
             try {
-              execSync(`tmux resize-window -t "${tmuxSession}" -x ${cols} -y ${rows}`, { stdio: "pipe" });
+              execSync(`${TMUX_PATH} resize-window -t "${tmuxSession}" -x ${cols} -y ${rows}`, { stdio: "pipe" });
             } catch { /* ignore — window may not resize if other clients attached */ }
             return;
           }
@@ -241,10 +253,10 @@ export function attachTerminalServer(
         try {
           const mapped = keyMap[msg];
           if (mapped) {
-            execSync(`tmux send-keys -t "${tmuxSession}" ${mapped}`, { stdio: "pipe" });
+            execSync(`${TMUX_PATH} send-keys -t "${tmuxSession}" ${mapped}`, { stdio: "pipe" });
           } else {
             // Use -l (literal) to send text without key name interpretation
-            execSync(`tmux send-keys -t "${tmuxSession}" -l ${JSON.stringify(msg)}`, { stdio: "pipe" });
+            execSync(`${TMUX_PATH} send-keys -t "${tmuxSession}" -l ${JSON.stringify(msg)}`, { stdio: "pipe" });
           }
         } catch (err) {
           logger.debug(`tmux send-keys failed: ${err}`);
