@@ -3,12 +3,12 @@
  *
  * Provides browser access to worker tmux sessions via xterm.js.
  * Uses node-pty (optional native dependency) for proper PTY support.
- * Falls back to a `script` wrapper if node-pty isn't available.
+ * Falls back to tmux capture-pane/send-keys polling if node-pty isn't available.
  */
 
 import { Server as HttpServer } from "http";
 import { WebSocketServer, WebSocket } from "ws";
-import { spawn, execSync, ChildProcess } from "child_process";
+import { execSync } from "child_process";
 import { logger } from "../logger.js";
 import { ProjectManager } from "../managers/project-manager.js";
 import { WorkerManager } from "../managers/worker-manager.js";
@@ -20,14 +20,14 @@ let nodePty: any = null;
 try {
   nodePty = await import("node-pty");
 } catch {
-  logger.info("node-pty not available — web terminal will use basic mode (install node-pty for full PTY support)");
+  logger.info("node-pty not available — web terminal will use tmux polling mode (install node-pty for full PTY support)");
 }
 
 interface TerminalSession {
   projectId: string;
   projectName: string;
   pty?: any;
-  proc?: ChildProcess;
+  pollTimer?: ReturnType<typeof setInterval>;
   ws: WebSocket;
 }
 
@@ -141,51 +141,102 @@ export function attachTerminalServer(
         pty.write(msg);
       });
     } else {
-      // Basic mode — use Python's pty module for a real pseudo-terminal.
-      // The `script` command doesn't properly relay piped stdin on macOS.
-      const pyCmd = [
-        "import pty, sys, os;",
-        `os.environ['TERM']='xterm-256color';`,
-        `pty.spawn(['tmux','attach-session','-t','${tmuxSession}'])`,
-      ].join(" ");
+      // Polling mode — uses tmux capture-pane for output and send-keys for input.
+      // No PTY needed. Works on any system with tmux.
+      let lastContent = "";
+      let cols = 200;
+      let rows = 50;
 
-      const proc = spawn("python3", ["-c", pyCmd], {
-        stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, TERM: "xterm-256color" },
-      });
-
-      const session: TerminalSession = { projectId: project.id, projectName: project.name, proc, ws };
-      activeSessions.set(ws, session);
-
-      proc.stdout?.on("data", (data: Buffer) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(data);
+      // Send initial screen content
+      try {
+        const initial = execSync(
+          `tmux capture-pane -t "${tmuxSession}" -p -e`,
+          { encoding: "utf-8", maxBuffer: 1024 * 1024 },
+        );
+        if (initial) {
+          ws.send(initial);
+          lastContent = initial;
         }
-      });
+      } catch { /* ignore */ }
 
-      proc.stderr?.on("data", (data: Buffer) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(data);
+      // Poll for screen changes
+      const pollTimer = setInterval(() => {
+        if (ws.readyState !== WebSocket.OPEN) {
+          clearInterval(pollTimer);
+          return;
         }
-      });
 
-      proc.on("exit", () => {
-        logger.info(`Web terminal process exited: ${projectName}`);
-        if (ws.readyState === WebSocket.OPEN) {
+        // Check session is still alive
+        if (!tmuxSessionExists(tmuxSession)) {
           ws.send("\r\n\x1b[33m[Terminal session ended]\x1b[0m\r\n");
+          clearInterval(pollTimer);
           ws.close();
+          return;
         }
-      });
+
+        try {
+          const content = execSync(
+            `tmux capture-pane -t "${tmuxSession}" -p -e`,
+            { encoding: "utf-8", maxBuffer: 1024 * 1024 },
+          );
+
+          if (content !== lastContent) {
+            // Clear screen and redraw — simplest way to sync state
+            ws.send("\x1b[2J\x1b[H" + content);
+            lastContent = content;
+          }
+        } catch {
+          // tmux session may have died
+        }
+      }, 250);
+
+      const session: TerminalSession = { projectId: project.id, projectName: project.name, pollTimer, ws };
+      activeSessions.set(ws, session);
 
       ws.on("message", (data) => {
         const msg = data.toString();
         try {
           const parsed = JSON.parse(msg);
-          if (parsed.type === "resize") return;
+          if (parsed.type === "resize" && parsed.cols && parsed.rows) {
+            cols = parsed.cols;
+            rows = parsed.rows;
+            try {
+              execSync(`tmux resize-window -t "${tmuxSession}" -x ${cols} -y ${rows}`, { stdio: "pipe" });
+            } catch { /* ignore — window may not resize if other clients attached */ }
+            return;
+          }
         } catch {
-          // Not JSON
+          // Not JSON — regular input
         }
-        proc.stdin?.write(msg);
+
+        // Map special characters to tmux key names, send the rest literally
+        const keyMap: Record<string, string> = {
+          "\r": "Enter",
+          "\n": "Enter",
+          "\x7f": "BSpace",
+          "\x1b[A": "Up",
+          "\x1b[B": "Down",
+          "\x1b[C": "Right",
+          "\x1b[D": "Left",
+          "\x1b": "Escape",
+          "\t": "Tab",
+          "\x03": "C-c",
+          "\x04": "C-d",
+          "\x1a": "C-z",
+          "\x0c": "C-l",
+        };
+
+        try {
+          const mapped = keyMap[msg];
+          if (mapped) {
+            execSync(`tmux send-keys -t "${tmuxSession}" ${mapped}`, { stdio: "pipe" });
+          } else {
+            // Use -l (literal) to send text without key name interpretation
+            execSync(`tmux send-keys -t "${tmuxSession}" -l ${JSON.stringify(msg)}`, { stdio: "pipe" });
+          }
+        } catch (err) {
+          logger.debug(`tmux send-keys failed: ${err}`);
+        }
       });
     }
 
@@ -196,8 +247,8 @@ export function attachTerminalServer(
         if (session.pty) {
           try { session.pty.kill(); } catch { /* ignore */ }
         }
-        if (session.proc) {
-          try { session.proc.kill(); } catch { /* ignore */ }
+        if (session.pollTimer) {
+          clearInterval(session.pollTimer);
         }
         activeSessions.delete(ws);
       }
