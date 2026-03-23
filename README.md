@@ -1,12 +1,12 @@
 # feral
 
-Unleash Claude Code on a dedicated machine. Run a team of AI developers safely in dangerous mode, managed entirely from Slack.
+Unleash Claude Code on a dedicated machine. Run a team of AI developers safely in dangerous mode, managed from Slack or Discord.
 
 ```
-Slack → Feral Orchestrator → Claude Code Workers → Your Repos
+Slack / Discord → Feral Orchestrator → Claude Code Workers → Your Repos
 ```
 
-**One message creates a project.** Feral sets up the folder, git repo, GitHub remote, Slack channel, and spins up a Claude Code worker — all wired together so you can talk to the worker directly in Slack.
+**One message creates a project.** Feral sets up the folder, git repo, GitHub remote, chat channel, and spins up a Claude Code worker — all wired together so you can talk to the worker directly in your chat platform of choice.
 
 **Pause and resume 20+ projects** while only running 3–4 workers at a time. Session state is preserved. Pick up exactly where you left off.
 
@@ -16,7 +16,7 @@ Slack → Feral Orchestrator → Claude Code Workers → Your Repos
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  Slack.                                                      │
+│  Slack / Discord                                             │
 │  "Start a new project called puzzle-quest, an iOS game"      │
 └──────────────────────────┬───────────────────────────────────┘
                            │
@@ -24,9 +24,9 @@ Slack → Feral Orchestrator → Claude Code Workers → Your Repos
 │  FERAL ORCHESTRATOR (Node.js on your machine)                │
 │  ├── Creates ~/projects/puzzle-quest/                        │
 │  ├── git init + gh repo create (private)                     │
-│  ├── Creates #proj-puzzle-quest in Slack                     │
+│  ├── Creates #proj-puzzle-quest channel                      │
 │  ├── Spawns Claude Code worker in tmux                       │
-│  └── Routes Slack ↔ Worker bidirectionally                   │
+│  └── Routes chat ↔ Worker bidirectionally                    │
 ├──────────────────────────────────────────────────────────────┤
 │  WORKERS (Claude Code instances — dangerous mode)            │
 │  ├── puzzle-quest  feat/themes   ● running                   │
@@ -47,7 +47,8 @@ Slack → Feral Orchestrator → Claude Code Workers → Your Repos
 - **Tailscale** (for secure remote access — free tier is fine)
 
 Optional:
-- **Slack workspace** with a bot (for phone control)
+- **Slack workspace** with a bot (for Slack integration)
+- **Discord server** with a bot (for Discord integration — native slash commands!)
 - **Xcode** (if building iOS/macOS projects)
 - **Docker** (for containerized builds)
 
@@ -78,8 +79,15 @@ cp .env.example .env
 Edit `.env` with your keys (leave `ANTHROPIC_API_KEY` blank if you used `claude login`):
 
 ```env
+# Slack (optional — either or both platforms work)
 SLACK_BOT_TOKEN=xoxb-...           # For Slack integration
 SLACK_APP_TOKEN=xapp-...           # For Slack socket mode
+
+# Discord (optional — either or both platforms work)
+DISCORD_BOT_TOKEN=...              # For Discord integration
+DISCORD_GUILD_ID=...               # Your server ID (recommended for instant slash command registration)
+
+# Other
 GITHUB_TOKEN=ghp_...               # For auto repo creation
 ```
 
@@ -89,13 +97,18 @@ GITHUB_TOKEN=ghp_...               # For auto repo creation
 npm run dev
 ```
 
-The dashboard is at `http://localhost:3000`. If Slack is configured, the bot is live.
+The dashboard is at `http://localhost:3000`. Whichever chat integrations are configured will start automatically. Both Slack and Discord can run simultaneously.
 
 ### 4. Create your first project
 
 In Slack:
 ```
 !new my-app web "A Next.js web application"
+```
+
+In Discord:
+```
+/feral new name:my-app template:Web description:A Next.js web application
 ```
 
 Or via API:
@@ -105,22 +118,59 @@ curl -X POST http://localhost:3000/api/projects \
   -d '{"name": "my-app", "template": "web", "description": "A Next.js web application"}'
 ```
 
-## Slack Commands
+## Chat Commands
+
+### Slack
 
 | Command | Description |
 |---------|-------------|
 | `!new <name> [template] [description]` | Create project + repo + channel + worker |
-| `!start <project> <branch> <prompt>` | Start a worker on a branch |
+| `!start [project] [prompt]` | Start a worker |
 | `!status` | Overview of all projects and active workers |
-| `!pause <project>` | Pause worker, save state |
-| `!resume <project> [instructions]` | Resume with full session history |
-| `!stop <project>` | Stop worker permanently |
+| `!pause [project]` | Pause worker, save state |
+| `!resume [project] [instructions]` | Resume with full session history |
+| `!stop [project]` | Stop worker permanently |
 | `!tell <project> <message>` | Send a message to a running worker |
-| `!logs <project> [lines]` | View worker terminal output |
+| `!logs [project] [lines]` | View worker terminal output |
+| `!cc /model sonnet` | Claude Code passthrough (any slash command) |
 | `!cleanup` | Prune completed git worktrees |
 | `!help` | Show all commands |
 
-**In project channels:** Any message you send in `#proj-<name>` is routed directly to that project's Claude Code worker.
+You can also @mention the bot from any channel for natural language interaction.
+
+### Discord
+
+Discord uses native slash commands with autocomplete:
+
+**Management:**
+
+| Command | Description |
+|---------|-------------|
+| `/feral new` | Create project (with template picker) |
+| `/feral start [project] [prompt]` | Start a worker |
+| `/feral status [project]` | Overview of all projects |
+| `/feral pause [project]` | Pause a worker |
+| `/feral resume [project] [instructions]` | Resume |
+| `/feral stop [project]` | Stop permanently |
+| `/feral tell <project> <message>` | Send message to a worker |
+| `/feral logs [project] [lines]` | View worker output |
+| `/feral cleanup` | Clean up worktrees |
+| `/feral help` | Show help |
+
+**Claude Code commands** (native slash commands — no prefix hack needed!):
+
+| Command | Description |
+|---------|-------------|
+| `/model sonnet\|opus\|haiku` | Switch model |
+| `/effort high\|medium\|low` | Set effort level |
+| `/compact` | Compact context window |
+| `/plan` | Toggle plan mode |
+| `/cost` | Show token usage |
+| `/cc <command>` | Any other Claude Code slash command |
+
+**In project channels:** Any message you type is routed directly to that project's Claude Code worker. Worker output appears in threads to keep the channel clean.
+
+**Auto-resume:** If a worker has died (e.g. idle timeout), typing in the project channel automatically resumes it with your message as the prompt.
 
 ## Project Templates
 
@@ -131,6 +181,30 @@ curl -X POST http://localhost:3000/api/projects \
 | `api` | Express + TypeScript API scaffold |
 | `ios` | Xcode-ready scaffold |
 | `fullstack` | npm workspaces with apps/ and packages/ |
+
+## Discord Setup
+
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) and create a new application.
+
+2. Under **Bot**, click "Reset Token" and copy it — this is your `DISCORD_BOT_TOKEN`.
+
+3. Under **Bot → Privileged Gateway Intents**, enable **Message Content Intent** (required for reading messages in project channels).
+
+4. Under **OAuth2 → URL Generator**, select the scopes `bot` and `applications.commands`, then select these bot permissions: Send Messages, Manage Channels, Create Public Threads, Send Messages in Threads, Read Message History, Embed Links.
+
+5. Open the generated URL to invite the bot to your server.
+
+6. Right-click your Discord server name → Copy Server ID (enable Developer Mode in settings if you don't see this). This is your `DISCORD_GUILD_ID`.
+
+7. Add to your `.env`:
+   ```env
+   DISCORD_BOT_TOKEN=your-bot-token-here
+   DISCORD_GUILD_ID=your-server-id-here
+   ```
+
+8. If discord.js isn't already installed: `npm install discord.js`
+
+9. Start Feral — slash commands register automatically. With a `DISCORD_GUILD_ID` they appear instantly; without it, global commands can take up to an hour.
 
 ## Dedicated Machine Setup
 
@@ -197,7 +271,7 @@ This blocks commits containing Anthropic API keys, Slack tokens, GitHub PATs, Op
 
 **Network requests** — Claude Code in dangerous mode can make arbitrary HTTP requests. Since there's nothing sensitive on the machine, exfiltration risk is minimal. For extra hardening, configure outbound firewall rules to allow only GitHub, npm, and the Anthropic API.
 
-**Slack bot token** — If compromised, someone could post as your bot. Consider using a dedicated Slack workspace for Feral, or limit the bot's channel scope.
+**Bot tokens** — If your Slack or Discord bot token is compromised, someone could post as your bot. Consider using a dedicated workspace/server for Feral, or limit the bot's channel scope.
 
 ### What's NOT a Risk
 
@@ -247,7 +321,10 @@ feral/
 │   │   ├── project-manager.ts    # Create/list/manage projects
 │   │   └── worker-manager.ts     # Spawn/pause/resume/stop workers
 │   ├── bot/
-│   │   └── slack-bot.ts          # Slack bot (commands + channel routing)
+│   │   ├── bot-controller.ts     # Shared logic (actions, NLU, CC passthrough)
+│   │   ├── slack-bot.ts          # Slack adapter (Bolt, !commands, @mentions)
+│   │   ├── discord-bot.ts        # Discord adapter (slash commands, threads)
+│   │   └── chat-nlu.ts           # Natural language intent parsing (Haiku)
 │   └── api/
 │       └── routes.ts             # Express REST API
 ├── dashboard/
@@ -300,14 +377,12 @@ Claude Code is powerful, but normally it's leashed — running on your laptop, a
 
 PRs welcome. The main areas that need work:
 
-- [ ] Discord bot (alternative to Slack)
-- [ ] Worker output streaming to Slack (real-time updates)
 - [ ] Dashboard improvements (log viewer, project creation form)
 - [ ] Webhook support (GitHub PR events, CI notifications)
 - [ ] Rate limit management across workers
-- [ ] Worker health monitoring and auto-restart
 - [ ] Multi-repo project support
 - [ ] Cost tracking per project
+- [ ] Matrix/IRC/Telegram adapters (the BotController pattern makes this easy)
 
 ## License
 
