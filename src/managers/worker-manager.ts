@@ -41,6 +41,8 @@ export class WorkerManager {
   private lastOutput: Map<string, string> = new Map();
   /** Accumulates new output per worker for debounced delivery */
   private pendingOutput: Map<string, string> = new Map();
+  /** Tracks whether the worker's prompt (❯) is currently visible — i.e. Claude is idle */
+  private workerReady: Map<string, boolean> = new Map();
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private flushInterval: ReturnType<typeof setInterval> | null = null;
   private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
@@ -172,7 +174,7 @@ export class WorkerManager {
    * output accumulates and gets delivered as one batch instead of many small messages.
    */
   startOutputPolling(
-    onOutput: (projectId: string, text: string) => void,
+    onOutput: (projectId: string, text: string, isFinal: boolean) => void,
     pollIntervalMs = 2000,
     flushIntervalMs = 8000
   ): void {
@@ -191,6 +193,11 @@ export class WorkerManager {
 
           const rawCapture = this.tmuxCapture(tmuxSession);
           if (!rawCapture) continue;
+
+          // Track whether Claude's prompt is showing (idle/ready)
+          const isReady = /❯/.test(rawCapture) || /bypass permissions on/i.test(rawCapture);
+          const wasReady = this.workerReady.get(worker.id) ?? true;
+          this.workerReady.set(worker.id, isReady);
 
           const lastRaw = this.lastOutput.get(worker.id) ?? "";
           if (rawCapture === lastRaw) continue;
@@ -214,13 +221,26 @@ export class WorkerManager {
               );
             }
           }
+
+          // If Claude just became ready (prompt returned), trigger an immediate flush
+          // so the final response posts as a new message rather than an edit
+          if (isReady && !wasReady) {
+            const pendingText = this.pendingOutput.get(worker.project_id);
+            if (pendingText && pendingText.length > 0) {
+              const truncated = pendingText.length > 3500
+                ? `...\n${pendingText.slice(-3500)}`
+                : pendingText;
+              onOutput(worker.project_id, truncated, true);
+              this.pendingOutput.delete(worker.project_id);
+            }
+          }
         } catch (err) {
           logger.debug(`Output poll error for worker ${worker.id}: ${err}`);
         }
       }
     }, pollIntervalMs);
 
-    // Stage 2: Flush accumulated output to Slack
+    // Stage 2: Flush accumulated output to Slack (in-progress output)
     this.flushInterval = setInterval(() => {
       for (const [projectId, text] of this.pendingOutput.entries()) {
         if (text.length > 0) {
@@ -228,7 +248,7 @@ export class WorkerManager {
           const truncated = text.length > 3500
             ? `...\n${text.slice(-3500)}`
             : text;
-          onOutput(projectId, truncated);
+          onOutput(projectId, truncated, false);
         }
       }
       this.pendingOutput.clear();

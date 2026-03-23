@@ -69,8 +69,17 @@ export class SlackBot {
     await this.app.start();
 
     // Start polling worker output and forwarding it to project channels.
-    this.workerManager.startOutputPolling(async (projectId, text) => {
-      await this.postLiveOutput(projectId, text);
+    // isFinal=true means Claude finished responding (prompt returned) —
+    // post as a new message instead of editing the live one.
+    this.workerManager.startOutputPolling(async (projectId, text, isFinal) => {
+      if (isFinal) {
+        // Claude is done — post as a brand-new message so the response
+        // stands on its own, then clear the live message tracker.
+        this.clearLiveMessage(projectId);
+        await this.postToProject(projectId, "```\n" + text.slice(-3000) + "\n```");
+      } else {
+        await this.postLiveOutput(projectId, text);
+      }
     });
 
     const mode = isNluAvailable() ? "natural language + commands" : "commands only (set ANTHROPIC_API_KEY for natural language)";
@@ -364,6 +373,7 @@ export class SlackBot {
         if (!project) return `:x: Project "${projectName}" not found`;
         const worker = this.workerManager.getForProject(project.id);
         if (!worker) return `:warning: No active worker for ${projectName}. Start or resume one first.`;
+        this.clearLiveMessage(project.id);
         this.workerManager.sendMessage(worker.id, message);
         return `:speech_balloon: Sent to *${projectName}*`;
       }
@@ -445,9 +455,10 @@ export class SlackBot {
       }
     }
 
-    // Send it. We use Escape first to make sure Claude isn't in the middle of
-    // something, then send the command.
+    // Send it — clear live message first so the response starts fresh
     try {
+      const project = this.projectManager.get(projectId);
+      if (project) this.clearLiveMessage(project.id);
       this.workerManager.sendMessage(worker.id, fullCommand);
       return `:zap: Sent \`${fullCommand}\` to worker.`;
     } catch (err) {
@@ -756,6 +767,9 @@ export class SlackBot {
         return;
       }
     }
+
+    // Clear the live message so Claude's response starts as a new message
+    this.clearLiveMessage(projectId);
 
     try {
       this.workerManager.sendMessage(worker.id, text);
