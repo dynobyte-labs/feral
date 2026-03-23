@@ -196,6 +196,10 @@ export class DiscordBot {
             .setDescription("Clean up worktrees to free disk space"),
         )
         .addSubcommand(sub =>
+          sub.setName("dashboard")
+            .setDescription("Get link to the web dashboard and terminal"),
+        )
+        .addSubcommand(sub =>
           sub.setName("help")
             .setDescription("Show help"),
         ),
@@ -420,6 +424,13 @@ export class DiscordBot {
         break;
       }
 
+      case "dashboard": {
+        const projectName = resolveProject(undefined);
+        const result = this.ctrl.getDashboardText(projectName);
+        await interaction.reply(result);
+        break;
+      }
+
       case "help": {
         await interaction.reply(this.getHelpText());
         break;
@@ -599,6 +610,7 @@ export class DiscordBot {
       "`/feral tell <project> <msg>` — Send a message to a worker",
       "`/feral logs [project]` — View output",
       "`/feral cleanup` — Clean up worktrees",
+      "`/feral dashboard` — Open the web dashboard",
       "",
       "⚡ **Claude Code commands** (native slash commands!):",
       "`/model sonnet` — Switch model",

@@ -258,6 +258,7 @@ export class SlackBot {
       "`!tell <project> <msg>` — Send a message to a worker",
       "`!logs [project] [lines]` — View output",
       "`!cleanup` — Clean up worktrees",
+      "`!dashboard` — Open the web dashboard",
       "",
       ":zap: *Claude Code commands:*",
       "`!cc /model sonnet` — Switch model",
@@ -384,6 +385,12 @@ export class SlackBot {
       } catch (err) {
         await say(`:x: ${err}`);
       }
+    });
+
+    this.app.message(/^!dashboard$/i, async ({ say, message }) => {
+      const projectName = this.projectNameFromChannel(message.channel);
+      const result = this.ctrl.getDashboardText(projectName);
+      await say(result);
     });
 
     this.app.message(/^!help$/i, async ({ say }) => {

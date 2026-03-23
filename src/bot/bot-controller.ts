@@ -245,6 +245,10 @@ export class BotController {
         return this.getHelpText();
       }
 
+      case "open_dashboard": {
+        return this.getDashboardText(params.project as string | undefined);
+      }
+
       default:
         return `🤔 I understood the action "${action}" but I don't know how to do that yet.`;
     }
@@ -370,6 +374,32 @@ export class BotController {
       "",
       "Use your platform's help command for the full list.",
     ].join("\n");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Dashboard link
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Build a dashboard link message, optionally deep-linking to a specific
+   * project's terminal.
+   */
+  getDashboardText(projectName?: string): string {
+    const base = config.dashboard.url;
+    const lines = [`🖥️ **Feral Dashboard:** ${base}`];
+
+    if (projectName) {
+      lines.push(`⌨️ **Terminal:** ${base}/terminal?project=${encodeURIComponent(projectName)}`);
+    }
+
+    if (base.includes("localhost")) {
+      lines.push(
+        "",
+        "_Tip: Set `DASHBOARD_URL` in .env to your Tailscale address (e.g. `http://mac-mini.tail1234.ts.net:3000`) so these links work from anywhere. No password needed — Tailscale handles access._",
+      );
+    }
+
+    return lines.filter(Boolean).join("\n");
   }
 
   // ---------------------------------------------------------------------------

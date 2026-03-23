@@ -14,6 +14,7 @@ const envSchema = z.object({
   DISCORD_GUILD_ID: z.string().optional(),
 
   DASHBOARD_TOKEN: z.string().optional(),
+  DASHBOARD_URL: z.string().optional(),
 
   GITHUB_TOKEN: z.string().optional(),
   GITHUB_ORG: z.string().optional(),
@@ -66,6 +67,7 @@ export const config = {
   dashboard: {
     token: env.DASHBOARD_TOKEN,
     authEnabled: !!env.DASHBOARD_TOKEN,
+    url: env.DASHBOARD_URL || `http://localhost:${env.PORT}`,
   },
 
   github: {
