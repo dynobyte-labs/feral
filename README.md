@@ -305,16 +305,6 @@ This blocks commits containing Anthropic API keys, Slack tokens, GitHub PATs, Op
 
 **Unattended operation** — Workers run autonomously and can make mistakes: deleting files, overwriting code, running expensive operations, or making unintended API calls. Monitor worker output regularly, use git branches for isolation, and review changes before merging.
 
-### What's NOT a Risk (with proper setup)
-
-- Claude Code can't escape the machine — it runs in a terminal process with no access to other devices
-- It can't access your laptop, phone, or other machines on your network (Tailscale doesn't bridge local networks by default)
-- It can't spend beyond your Anthropic API plan limits
-- If it breaks the OS, you factory reset and you're back in 30 minutes
-- The dashboard and terminal are unreachable from outside your tailnet
-
-**These assumptions only hold if you follow the setup instructions.** If you skip Tailscale, expose the port publicly, or run on a machine with sensitive data, the risk profile changes dramatically.
-
 ### Security Checklist
 
 Before running Feral, verify:
