@@ -4,21 +4,23 @@ import { config } from "../config.js";
 import { logger } from "../logger.js";
 import { ProjectManager } from "../managers/project-manager.js";
 import { WorkerManager } from "../managers/worker-manager.js";
-import { parseIntent, isNluAvailable } from "./chat-nlu.js"; // NLU used in team-manager only
+import { parseIntent, isNluAvailable } from "./chat-nlu.js";
 
 /**
- * Slack bot with two interfaces:
- * 1. Natural language (powered by Claude) — just talk to it
- * 2. !commands as a fallback when NLU is unavailable
+ * Slack bot with three interaction modes:
+ * 1. @mention the bot — works anywhere, triggers NLU or command parsing
+ * 2. !commands — explicit fallback, always available
+ * 3. Project channel messages — routed directly to the Claude Code worker
  *
- * Per-project channels route messages directly to the Claude Code worker,
- * or through NLU to determine intent.
+ * Also supports !cc for passing Claude Code internal commands (/model, /compact, etc.)
+ * directly to the worker's tmux session.
  */
 export class SlackBot {
   private app: SlackApp | null = null;
   private client: WebClient | null = null;
   private projectManager: ProjectManager;
   private workerManager: WorkerManager;
+  private botUserId: string | null = null;
 
   /** Maps Slack channel IDs to project IDs for routing */
   private channelToProject: Map<string, string> = new Map();
@@ -44,6 +46,15 @@ export class SlackBot {
 
     this.client = new WebClient(config.slack.botToken);
 
+    // Get the bot's own user ID so we can detect @mentions
+    try {
+      const auth = await this.client.auth.test();
+      this.botUserId = auth.user_id as string;
+      logger.info(`Bot user ID: ${this.botUserId}`);
+    } catch (err) {
+      logger.warn(`Could not get bot user ID: ${err}`);
+    }
+
     // Load existing channel mappings from database
     for (const project of this.projectManager.list()) {
       if (project.slack_channel_id) {
@@ -51,15 +62,13 @@ export class SlackBot {
       }
     }
 
-    // Register !commands as fallback
-    this.registerLegacyCommands();
-    // Register the main message handler (NLU + project channel routing)
+    // Register handlers
+    this.registerCommands();
     this.registerMessageHandler();
 
     await this.app.start();
 
     // Start polling worker output and forwarding it to project channels.
-    // Uses postLiveOutput so output edits a single message instead of spamming new ones.
     this.workerManager.startOutputPolling(async (projectId, text) => {
       await this.postLiveOutput(projectId, text);
     });
@@ -67,6 +76,27 @@ export class SlackBot {
     const mode = isNluAvailable() ? "natural language + commands" : "commands only (set ANTHROPIC_API_KEY for natural language)";
     logger.info(`Slack bot started (socket mode, ${mode})`);
   }
+
+  // ---------------------------------------------------------------------------
+  // @mention handling
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Check if a message is an @mention of the bot.
+   * Returns the message text with the @mention stripped, or null if not a mention.
+   */
+  private extractMention(text: string): string | null {
+    if (!this.botUserId) return null;
+    const mentionPattern = new RegExp(`<@${this.botUserId}>\\s*`, "gi");
+    if (!mentionPattern.test(text)) return null;
+    // Reset lastIndex after test()
+    mentionPattern.lastIndex = 0;
+    return text.replace(mentionPattern, "").trim();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Channel management
+  // ---------------------------------------------------------------------------
 
   /**
    * Create a Slack channel for a project and wire it up.
@@ -115,29 +145,20 @@ export class SlackBot {
       });
 
       // Post intro message
-      const introLines = [
-        `:rocket: *Project ${project.name}* initialized.`,
-        project.repo_url ? `Repo: ${project.repo_url}` : "",
-        `Template: \`${project.template}\``,
-        "",
-      ];
-
-      if (isNluAvailable()) {
-        introLines.push(
-          "Just talk to me naturally here. I'll figure out if you're giving instructions to the worker, asking about status, or managing the project.",
-          "",
-          'Try: _"start working on building a REST API"_ or _"how\'s it going?"_ or _"show me the logs"_'
-        );
-      } else {
-        introLines.push(
-          "Send messages here to interact with the Claude Code worker.",
-          "Commands: `!status` `!pause` `!resume` `!logs` `!stop`"
-        );
-      }
-
       await this.client.chat.postMessage({
         channel: channelId,
-        text: introLines.filter(Boolean).join("\n"),
+        text: [
+          `:rocket: *Project ${project.name}* initialized.`,
+          project.repo_url ? `Repo: ${project.repo_url}` : "",
+          `Template: \`${project.template}\``,
+          "",
+          "Messages you type here go straight to the Claude Code worker.",
+          "",
+          "*Worker management:* `!start` `!pause` `!resume` `!stop` `!status` `!logs`",
+          "*Claude Code commands:* `!cc /model sonnet` `!cc /compact` `!cc /plan` etc.",
+          "",
+          "Or just @mention me anywhere for natural language control.",
+        ].filter(Boolean).join("\n"),
       });
 
       // Wire up
@@ -152,9 +173,12 @@ export class SlackBot {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Slack messaging
+  // ---------------------------------------------------------------------------
+
   /**
    * Post a message to a project's Slack channel.
-   * For regular messages (commands, status), posts a new message.
    */
   async postToProject(projectId: string, text: string): Promise<void> {
     if (!this.client) return;
@@ -173,11 +197,7 @@ export class SlackBot {
 
   /**
    * Post or update a "live output" message for a project.
-   * Instead of posting a new message every time Claude produces output,
-   * this edits a single message per project channel. When Claude finishes
-   * (indicated by a long pause), the next output starts a fresh message.
-   *
-   * This dramatically reduces Slack message noise during active work.
+   * Edits a single message instead of posting new ones while Claude works.
    */
   async postLiveOutput(projectId: string, text: string): Promise<void> {
     if (!this.client) return;
@@ -185,16 +205,13 @@ export class SlackBot {
     if (!project?.slack_channel_id) return;
     const channelId = project.slack_channel_id;
 
-    // Format the output as a code block for readability
     const formatted = "```\n" + text.slice(-3000) + "\n```";
 
     try {
       const existing = this.liveMessages.get(projectId);
 
       if (existing) {
-        // Append new content to existing message
         const combined = existing.text + "\n" + text;
-        // Keep last 3000 chars to stay under Slack's limit
         const truncated = combined.length > 3000
           ? "..." + combined.slice(-3000)
           : combined;
@@ -209,13 +226,11 @@ export class SlackBot {
           this.liveMessages.set(projectId, { ts: existing.ts, text: truncated });
           return;
         } catch (updateErr) {
-          // Message might be too old to edit (Slack limit) — post a new one
           logger.debug(`Could not update live message, posting new: ${updateErr}`);
           this.liveMessages.delete(projectId);
         }
       }
 
-      // Post a new message and track it
       const result = await this.client.chat.postMessage({
         channel: channelId,
         text: formatted,
@@ -229,10 +244,6 @@ export class SlackBot {
     }
   }
 
-  /**
-   * Clear the live message tracker for a project (e.g., when worker stops).
-   * The next output will start a fresh message.
-   */
   clearLiveMessage(projectId: string): void {
     this.liveMessages.delete(projectId);
   }
@@ -241,9 +252,6 @@ export class SlackBot {
   // NLU action executor
   // ---------------------------------------------------------------------------
 
-  /**
-   * Execute a parsed NLU action and return a Slack-friendly response.
-   */
   private async executeAction(
     action: string,
     params: Record<string, unknown>
@@ -314,7 +322,6 @@ export class SlackBot {
         if (!project) return `:x: Project "${projectName}" not found`;
         const worker = this.workerManager.getForProject(project.id);
         if (!worker) {
-          // Check if already paused
           const stoppable = this.workerManager.getStoppableWorkerForProject(project.id);
           if (stoppable?.status === "paused") return `:pause_button: *${projectName}* is already paused. Use \`!resume\` to start it back up.`;
           return `:warning: No active worker for ${projectName}`;
@@ -339,7 +346,6 @@ export class SlackBot {
         if (!project) return `:x: Project "${projectName}" not found`;
         const worker = this.workerManager.getStoppableWorkerForProject(project.id);
         if (!worker) {
-          // No worker record but project might still show active — reset it
           if (project.status !== "idle") {
             this.projectManager.setStatus(project.id, "idle");
             return `:stop_button: *${projectName}* reset to idle (worker was already gone).`;
@@ -383,36 +389,7 @@ export class SlackBot {
       }
 
       case "show_help": {
-        if (isNluAvailable()) {
-          return [
-            ":wave: *I'm Feral* — just talk to me naturally! Here's what I can do:",
-            "",
-            ":hammer_and_wrench: *Create projects* — _\"create a new web project called my-app for building a todo list\"_",
-            ":rocket: *Start workers* — _\"start working on my-app, build the API endpoints\"_",
-            ":bar_chart: *Check status* — _\"how are things going?\"_ or _\"status\"_",
-            ":pause_button: *Pause/Resume* — _\"pause my-app\"_ or _\"resume my-app and focus on tests\"_",
-            ":speech_balloon: *Talk to workers* — just type in a project channel and I'll route it",
-            ":page_facing_up: *View logs* — _\"show me the logs for my-app\"_",
-            ":stop_button: *Stop workers* — _\"stop my-app\"_",
-            "",
-            "_You can also use `!commands`: `!new myapp`, `!start myapp`, `!status`, `!pause myapp`, `!resume myapp`, `!stop myapp`, `!logs myapp`_",
-          ].join("\n");
-        }
-        return [
-          ":book: *Feral Commands*",
-          "",
-          "`!new <name> [description]` — Create a new project",
-          "`!start <name> [prompt]` — Start a worker (defaults to main branch)",
-          "`!status` — Overview of all projects",
-          "`!pause <name>` — Pause a running worker",
-          "`!resume <name> [instructions]` — Resume a paused project",
-          "`!stop <name>` — Stop a worker permanently",
-          "`!tell <name> <message>` — Send a message to a running worker",
-          "`!logs <name> [lines]` — View worker output",
-          "`!cleanup` — Clean up worktrees",
-          "",
-          "_Set ANTHROPIC_API_KEY to enable natural language mode!_",
-        ].join("\n");
+        return this.getHelpText();
       }
 
       default:
@@ -421,13 +398,141 @@ export class SlackBot {
   }
 
   // ---------------------------------------------------------------------------
-  // Legacy !commands (always available as fallback)
+  // Claude Code passthrough
   // ---------------------------------------------------------------------------
 
-  private registerLegacyCommands(): void {
+  /**
+   * Known Claude Code slash commands and whether they need arguments to work
+   * non-interactively. Commands marked `interactive: true` open a TUI picker
+   * and need an argument to skip the picker.
+   */
+  private static readonly CC_COMMANDS: Record<string, { description: string; interactive: boolean; hint?: string }> = {
+    "/model":    { description: "Switch model", interactive: true, hint: "Usage: `!cc /model sonnet` or `!cc /model opus` or `!cc /model haiku`" },
+    "/effort":   { description: "Set effort level", interactive: true, hint: "Usage: `!cc /effort high` or `!cc /effort medium` or `!cc /effort low`" },
+    "/compact":  { description: "Compact conversation to save context", interactive: false },
+    "/plan":     { description: "Toggle plan mode", interactive: false },
+    "/init":     { description: "Create CLAUDE.md file", interactive: false },
+    "/clear":    { description: "Clear conversation history", interactive: false },
+    "/cost":     { description: "Show token usage and cost", interactive: false },
+    "/help":     { description: "Show Claude Code help", interactive: false },
+    "/logout":   { description: "Log out of Claude Code", interactive: false },
+    "/status":   { description: "Show Claude Code status", interactive: false },
+    "/config":   { description: "Open config", interactive: true, hint: "This command opens an interactive menu — may not work well via Slack" },
+    "/plugins":  { description: "Manage plugins", interactive: true, hint: "This command opens an interactive picker — may not work well via Slack" },
+    "/mcp":      { description: "Manage MCP servers", interactive: true, hint: "This command opens an interactive menu — may not work well via Slack" },
+  };
+
+  /**
+   * Send a Claude Code slash command directly to a worker's tmux session.
+   * Returns a status message for Slack.
+   */
+  private sendCCCommand(projectId: string, command: string): string {
+    const worker = this.workerManager.getForProject(projectId);
+    if (!worker) return `:warning: No active worker. Start or resume one first.`;
+
+    // Parse the command name and arguments
+    const parts = command.trim().split(/\s+/);
+    const cmdName = parts[0].toLowerCase();
+    const cmdArgs = parts.slice(1).join(" ");
+    const fullCommand = command.trim();
+
+    // Check if it's a known command
+    const known = SlackBot.CC_COMMANDS[cmdName];
+    if (known) {
+      // Warn about interactive commands that need arguments
+      if (known.interactive && !cmdArgs) {
+        return `:warning: \`${cmdName}\` is interactive and needs an argument to work via Slack.\n${known.hint || ""}`;
+      }
+    }
+
+    // Send it. We use Escape first to make sure Claude isn't in the middle of
+    // something, then send the command.
+    try {
+      this.workerManager.sendMessage(worker.id, fullCommand);
+      return `:zap: Sent \`${fullCommand}\` to worker.`;
+    } catch (err) {
+      return `:x: Failed to send command: ${err}`;
+    }
+  }
+
+  /**
+   * Get a formatted list of available Claude Code commands.
+   */
+  private getCCHelpText(): string {
+    const lines = [":zap: *Claude Code commands* (use with `!cc`):", ""];
+    for (const [cmd, info] of Object.entries(SlackBot.CC_COMMANDS)) {
+      const tag = info.interactive ? " _(needs args)_" : "";
+      lines.push(`\`!cc ${cmd}\` — ${info.description}${tag}`);
+    }
+    lines.push("", "Any `/slash` command Claude Code supports will be forwarded — these are just the common ones.");
+    return lines.join("\n");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Help text
+  // ---------------------------------------------------------------------------
+
+  private getHelpText(): string {
+    const mentionText = this.botUserId ? `<@${this.botUserId}>` : "@Feral";
+    return [
+      ":wave: *I'm Feral* — I manage Claude Code workers on your dedicated machine.",
+      "",
+      ":speech_balloon: *Talk to me:*",
+      `Just @mention me: ${mentionText} _create a project called my-app_`,
+      `Or in a project channel, type directly — it goes straight to the worker.`,
+      "",
+      ":hammer_and_wrench: *Management commands:*",
+      "`!new <name> [desc]` — Create a project",
+      "`!start [project] [prompt]` — Start a worker",
+      "`!status` — Overview of all projects",
+      "`!pause [project]` — Pause a worker",
+      "`!resume [project] [instructions]` — Resume",
+      "`!stop [project]` — Stop permanently",
+      "`!tell <project> <msg>` — Send a message to a worker",
+      "`!logs [project] [lines]` — View output",
+      "`!cleanup` — Clean up worktrees",
+      "",
+      ":zap: *Claude Code commands:*",
+      "`!cc /model sonnet` — Switch model",
+      "`!cc /effort high` — Set effort level",
+      "`!cc /compact` — Compact context",
+      "`!cc /plan` — Toggle plan mode",
+      "`!cc /cost` — Show token usage",
+      "`!cc /clear` — Clear conversation",
+      "`!cc /help` — List all CC commands",
+      "",
+      "_In project channels, project name is auto-detected — just use `!pause`, `!logs`, etc._",
+    ].join("\n");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Command registration (! commands)
+  // ---------------------------------------------------------------------------
+
+  private registerCommands(): void {
     if (!this.app) return;
 
-    // !new <name> [description]  — template always defaults to empty
+    // !cc <slash-command> — Claude Code passthrough
+    this.app.message(/^!cc\s+(.+)$/is, async ({ say, message, context }) => {
+      const [, command] = context.matches!;
+      const projectId = this.channelToProject.get(message.channel);
+
+      if (!projectId) {
+        // Not in a project channel — need to figure out which project
+        await say(`:x: Use \`!cc\` from a project channel so I know which worker to send to.`);
+        return;
+      }
+
+      if (command.trim().toLowerCase() === "help") {
+        await say(this.getCCHelpText());
+        return;
+      }
+
+      const result = this.sendCCCommand(projectId, command.trim());
+      await say(result);
+    });
+
+    // !new <name> [description]
     this.app.message(/^!new\s+(\S+)\s*(.*)$/i, async ({ say, context }) => {
       const [, name, description] = context.matches!;
       await say(`:hammer_and_wrench: Creating project *${name}*...`);
@@ -436,7 +541,7 @@ export class SlackBot {
       }).then(result => say(result)).catch(err => say(`:x: ${err}`));
     });
 
-    // !start [project] [prompt]  — project auto-detected from channel if omitted
+    // !start [project] [prompt]
     this.app.message(/^!start(?:\s+(\S+))?\s*(.*)$/is, async ({ say, message, context }) => {
       const [, nameArg, prompt] = context.matches!;
       const projectName = nameArg?.trim() || this.projectNameFromChannel(message.channel);
@@ -454,7 +559,6 @@ export class SlackBot {
         .then(result => say(result)).catch(err => say(`:x: ${err}`));
     });
 
-    // !pause [project]
     this.app.message(/^!pause(?:\s+(\S+))?$/i, async ({ say, message, context }) => {
       const [, nameArg] = context.matches!;
       const projectName = nameArg?.trim() || this.projectNameFromChannel(message.channel);
@@ -464,7 +568,6 @@ export class SlackBot {
         .then(result => say(result)).catch(err => say(`:x: ${err}`));
     });
 
-    // !resume [project] [instructions]
     this.app.message(/^!resume(?:\s+(\S+))?\s*(.*)$/is, async ({ say, message, context }) => {
       const [, nameArg, instructions] = context.matches!;
       const projectName = nameArg?.trim() || this.projectNameFromChannel(message.channel);
@@ -475,7 +578,6 @@ export class SlackBot {
       }).then(result => say(result)).catch(err => say(`:x: ${err}`));
     });
 
-    // !stop [project]
     this.app.message(/^!stop(?:\s+(\S+))?$/i, async ({ say, message, context }) => {
       const [, nameArg] = context.matches!;
       const projectName = nameArg?.trim() || this.projectNameFromChannel(message.channel);
@@ -485,7 +587,6 @@ export class SlackBot {
         .then(result => say(result)).catch(err => say(`:x: ${err}`));
     });
 
-    // !logs [project] [lines]
     this.app.message(/^!logs(?:\s+(\S+))?\s*(\d+)?$/i, async ({ say, message, context }) => {
       const [, nameArg, lineCount] = context.matches!;
       const projectName = nameArg?.trim() || this.projectNameFromChannel(message.channel);
@@ -517,13 +618,12 @@ export class SlackBot {
     });
 
     this.app.message(/^!help$/i, async ({ say }) => {
-      const result = await this.executeAction("show_help", {});
-      await say(result);
+      await say(this.getHelpText());
     });
   }
 
   // ---------------------------------------------------------------------------
-  // Main message handler — NLU for natural language, routing for project channels
+  // Main message handler — @mentions, NLU, project channel routing
   // ---------------------------------------------------------------------------
 
   private registerMessageHandler(): void {
@@ -531,58 +631,93 @@ export class SlackBot {
 
     this.app.message(async ({ message, say }) => {
       if (!("text" in message) || !message.text) return;
-      if (message.text.startsWith("!")) return; // Handled by legacy commands
+      if (message.text.startsWith("!")) return; // Handled by command handlers
 
       // Skip bot messages to avoid loops
       if ("bot_id" in message && message.bot_id) return;
 
-      const text = message.text.trim();
+      const rawText = message.text.trim();
       const projectId = this.channelToProject.get(message.channel);
 
-      // --- Project channel: smart routing ---
-      if (projectId) {
-        const project = this.projectManager.get(projectId);
-        if (!project) return;
+      // Check if this is an @mention
+      const mentionedText = this.extractMention(rawText);
+      const isMention = mentionedText !== null;
+      const text = mentionedText ?? rawText;
 
-        // Project channels: all messages go directly to the worker.
-        // No NLU here — don't waste tokens on routing decisions.
-        // Use !commands for management actions (pause, stop, logs, etc.)
-        this.routeToWorker(project.id, text, say);
+      // --- @mention from anywhere: process as a management command ---
+      if (isMention) {
+        await this.handleMentionOrNLU(text, message.channel, say);
         return;
       }
 
-      // --- Non-project channel: NLU for management commands ---
+      // --- Project channel (not a mention): route to worker ---
+      if (projectId) {
+        this.routeToWorker(projectId, text, say);
+        return;
+      }
+
+      // --- Non-project channel, not a mention: NLU if available ---
+      // Only respond if NLU detects an intent (don't respond to random chatter)
       if (isNluAvailable()) {
-        try {
-          const projects = this.projectManager.list();
-          const activeWorkers = this.workerManager.listActive();
-          const stateContext = `${projects.length} projects (${activeWorkers.length} active workers): ${projects.map(p => `${p.name} [${p.status}]`).join(", ") || "none"}`;
-
-          const nlu = await parseIntent(text, { stateContext });
-
-          if (nlu.action) {
-            try {
-              const result = await this.executeAction(nlu.action, nlu.params);
-              const response = nlu.reply ? `${nlu.reply}\n\n${result}` : result;
-              await say(response);
-            } catch (err) {
-              await say(`:x: ${err}`);
-            }
-          } else if (nlu.reply) {
-            await say(nlu.reply);
-          }
-          // If no action and no reply, stay quiet (probably not meant for the bot)
-        } catch (err) {
-          logger.error(`NLU error: ${err}`);
-        }
+        await this.handleMentionOrNLU(text, message.channel, say);
       }
     });
   }
 
   /**
-   * Look up the project name for a given Slack channel ID.
-   * Returns undefined if the channel isn't a project channel.
+   * Handle a message that's either an @mention or general-channel NLU.
+   * Uses NLU to parse intent, or falls back to basic keyword matching.
    */
+  private async handleMentionOrNLU(
+    text: string,
+    channel: string,
+    say: (msg: string) => Promise<unknown>
+  ): Promise<void> {
+    // Quick keyword matching for common requests (no NLU needed)
+    if (/^help$/i.test(text)) {
+      await say(this.getHelpText());
+      return;
+    }
+    if (/^status$/i.test(text)) {
+      const result = await this.executeAction("get_status", {});
+      await say(result);
+      return;
+    }
+
+    // Try NLU for natural language
+    if (isNluAvailable()) {
+      try {
+        const projects = this.projectManager.list();
+        const activeWorkers = this.workerManager.listActive();
+        const stateContext = `${projects.length} projects (${activeWorkers.length} active workers): ${projects.map(p => `${p.name} [${p.status}]`).join(", ") || "none"}`;
+
+        const nlu = await parseIntent(text, { stateContext });
+
+        if (nlu.action) {
+          try {
+            const result = await this.executeAction(nlu.action, nlu.params);
+            const response = nlu.reply ? `${nlu.reply}\n\n${result}` : result;
+            await say(response);
+          } catch (err) {
+            await say(`:x: ${err}`);
+          }
+        } else if (nlu.reply) {
+          await say(nlu.reply);
+        }
+      } catch (err) {
+        logger.error(`NLU error: ${err}`);
+        await say(`:x: Sorry, I had trouble understanding that. Try \`!help\` for commands.`);
+      }
+    } else {
+      // No NLU available — tell the user to use commands
+      await say(`I heard you, but natural language mode needs an ANTHROPIC_API_KEY. Try \`!help\` for available commands.`);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
   private projectNameFromChannel(channelId: string): string | undefined {
     const projectId = this.channelToProject.get(channelId);
     if (!projectId) return undefined;
