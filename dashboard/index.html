@@ -445,19 +445,36 @@ let state = { projects: [], workers: [], health: {}, events: [], selectedProject
 const API = '';
 
 // ---- Data Fetching ----
+async function safeFetchJson(url, fallback) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.warn(`API ${url} returned ${res.status}`);
+      return fallback;
+    }
+    return await res.json();
+  } catch (e) {
+    console.warn(`API ${url} failed:`, e);
+    return fallback;
+  }
+}
+
 async function fetchData() {
   try {
-    const [projRes, workersRes, healthRes] = await Promise.all([
-      fetch(`${API}/api/projects`),
-      fetch(`${API}/api/workers`),
-      fetch(`${API}/api/health`),
+    const [projects, workers, health] = await Promise.all([
+      safeFetchJson(`${API}/api/projects`, null),
+      safeFetchJson(`${API}/api/workers`, null),
+      safeFetchJson(`${API}/api/health`, null),
     ]);
-    state.projects = await projRes.json();
-    state.workers = await workersRes.json();
-    state.health = await healthRes.json();
-    document.getElementById('conn-dot').className = 'dot';
-    document.getElementById('conn-text').textContent = 'Connected';
-    return true;
+    // Only update state for successful responses — keep stale data otherwise
+    if (projects !== null) state.projects = projects;
+    if (workers !== null) state.workers = workers;
+    if (health !== null) state.health = health;
+    // Connected if at least the health endpoint responded
+    const connected = health !== null;
+    document.getElementById('conn-dot').className = connected ? 'dot' : 'dot disconnected';
+    document.getElementById('conn-text').textContent = connected ? 'Connected' : 'Reconnecting...';
+    return connected;
   } catch (e) {
     document.getElementById('conn-dot').className = 'dot disconnected';
     document.getElementById('conn-text').textContent = 'Disconnected';
@@ -466,10 +483,7 @@ async function fetchData() {
 }
 
 async function fetchProjectDetail(id) {
-  try {
-    const res = await fetch(`${API}/api/projects/${id}`);
-    return await res.json();
-  } catch (e) { return null; }
+  return await safeFetchJson(`${API}/api/projects/${id}`, null);
 }
 
 // ---- Render ----

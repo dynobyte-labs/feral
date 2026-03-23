@@ -1,5 +1,6 @@
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import { config } from "../config.js";
+import { logger } from "../logger.js";
 import { ProjectManager } from "../managers/project-manager.js";
 import { WorkerManager } from "../managers/worker-manager.js";
 
@@ -12,24 +13,34 @@ export function createRouter(
   // ---- Projects ----
 
   router.get("/api/projects", (_req: Request, res: Response) => {
-    const projects = projectManager.list();
-    const workers = workerManager.listActive();
-    const enriched = projects.map((p) => ({
-      ...p,
-      activeWorker: workers.find((w) => w.project_id === p.id) || null,
-    }));
-    res.json(enriched);
+    try {
+      const projects = projectManager.list();
+      const workers = workerManager.listActive();
+      const enriched = projects.map((p) => ({
+        ...p,
+        activeWorker: workers.find((w) => w.project_id === p.id) || null,
+      }));
+      res.json(enriched);
+    } catch (err: any) {
+      logger.error(`GET /api/projects failed: ${err}`);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   router.get("/api/projects/:id", (req: Request, res: Response) => {
-    const project = projectManager.get(req.params.id);
-    if (!project) return res.status(404).json({ error: "Not found" });
+    try {
+      const project = projectManager.get(req.params.id);
+      if (!project) return res.status(404).json({ error: "Not found" });
 
-    const worker = workerManager.getForProject(project.id);
-    const brief = projectManager.getBrief(project.id);
-    const events = projectManager.getRecentEvents(project.id, 50);
+      const worker = workerManager.getForProject(project.id);
+      const brief = projectManager.getBrief(project.id);
+      const events = projectManager.getRecentEvents(project.id, 50);
 
-    res.json({ ...project, activeWorker: worker || null, brief, events });
+      res.json({ ...project, activeWorker: worker || null, brief, events });
+    } catch (err: any) {
+      logger.error(`GET /api/projects/:id failed: ${err}`);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   router.post("/api/projects", async (req: Request, res: Response) => {
@@ -44,8 +55,13 @@ export function createRouter(
   // ---- Workers ----
 
   router.get("/api/workers", (_req: Request, res: Response) => {
-    const all = workerManager.listAll();
-    res.json(all);
+    try {
+      const all = workerManager.listAll();
+      res.json(all);
+    } catch (err: any) {
+      logger.error(`GET /api/workers failed: ${err}`);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   router.post("/api/workers", async (req: Request, res: Response) => {
@@ -109,17 +125,22 @@ export function createRouter(
   // ---- Health ----
 
   router.get("/api/health", (_req: Request, res: Response) => {
-    const active = workerManager.listActive();
-    const projects = projectManager.list();
-    res.json({
-      status: "ok",
-      uptime: process.uptime(),
-      projects: projects.length,
-      activeWorkers: active.length,
-      maxWorkers: config.maxWorkers,
-      pausedProjects: projects.filter((p) => p.status === "paused").length,
-      totalMessages: active.reduce((sum, w) => sum + (w.message_count || 0), 0),
-    });
+    try {
+      const active = workerManager.listActive();
+      const projects = projectManager.list();
+      res.json({
+        status: "ok",
+        uptime: process.uptime(),
+        projects: projects.length,
+        activeWorkers: active.length,
+        maxWorkers: config.maxWorkers,
+        pausedProjects: projects.filter((p) => p.status === "paused").length,
+        totalMessages: active.reduce((sum, w) => sum + (w.message_count || 0), 0),
+      });
+    } catch (err: any) {
+      logger.error(`GET /api/health failed: ${err}`);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   return router;

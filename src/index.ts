@@ -36,6 +36,23 @@ async function main() {
     res.sendFile(path.join(dashboardPath, "index.html"));
   });
 
+  // Global error handler — catches anything the route-level try/catch missed
+  app.use((err: any, _req: any, res: any, _next: any) => {
+    logger.error(`Unhandled Express error: ${err.stack || err}`);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Prevent unhandled rejections from crashing the process
+  process.on("unhandledRejection", (reason) => {
+    logger.error(`Unhandled rejection: ${reason}`);
+  });
+  process.on("uncaughtException", (err) => {
+    logger.error(`Uncaught exception: ${err.stack || err}`);
+    // Don't exit — keep the server running
+  });
+
   app.listen(config.port, () => {
     logger.info(`Dashboard: http://localhost:${config.port}`);
   });
