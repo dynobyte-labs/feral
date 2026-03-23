@@ -22,6 +22,8 @@ export class SlackBot {
 
   /** Maps Slack channel IDs to project IDs for routing */
   private channelToProject: Map<string, string> = new Map();
+  /** Tracks the "live output" message per project channel so we can edit instead of re-post */
+  private liveMessages: Map<string, { ts: string; text: string }> = new Map();
 
   constructor(projectManager: ProjectManager, workerManager: WorkerManager) {
     this.projectManager = projectManager;
@@ -56,9 +58,10 @@ export class SlackBot {
 
     await this.app.start();
 
-    // Start polling worker output and forwarding it to project channels
+    // Start polling worker output and forwarding it to project channels.
+    // Uses postLiveOutput so output edits a single message instead of spamming new ones.
     this.workerManager.startOutputPolling(async (projectId, text) => {
-      await this.postToProject(projectId, text);
+      await this.postLiveOutput(projectId, text);
     });
 
     const mode = isNluAvailable() ? "natural language + commands" : "commands only (set ANTHROPIC_API_KEY for natural language)";
@@ -151,6 +154,7 @@ export class SlackBot {
 
   /**
    * Post a message to a project's Slack channel.
+   * For regular messages (commands, status), posts a new message.
    */
   async postToProject(projectId: string, text: string): Promise<void> {
     if (!this.client) return;
@@ -165,6 +169,72 @@ export class SlackBot {
     } catch (err) {
       logger.warn(`Failed to post to Slack: ${err}`);
     }
+  }
+
+  /**
+   * Post or update a "live output" message for a project.
+   * Instead of posting a new message every time Claude produces output,
+   * this edits a single message per project channel. When Claude finishes
+   * (indicated by a long pause), the next output starts a fresh message.
+   *
+   * This dramatically reduces Slack message noise during active work.
+   */
+  async postLiveOutput(projectId: string, text: string): Promise<void> {
+    if (!this.client) return;
+    const project = this.projectManager.get(projectId);
+    if (!project?.slack_channel_id) return;
+    const channelId = project.slack_channel_id;
+
+    // Format the output as a code block for readability
+    const formatted = "```\n" + text.slice(-3000) + "\n```";
+
+    try {
+      const existing = this.liveMessages.get(projectId);
+
+      if (existing) {
+        // Append new content to existing message
+        const combined = existing.text + "\n" + text;
+        // Keep last 3000 chars to stay under Slack's limit
+        const truncated = combined.length > 3000
+          ? "..." + combined.slice(-3000)
+          : combined;
+        const updatedFormatted = "```\n" + truncated + "\n```";
+
+        try {
+          await this.client.chat.update({
+            channel: channelId,
+            ts: existing.ts,
+            text: updatedFormatted,
+          });
+          this.liveMessages.set(projectId, { ts: existing.ts, text: truncated });
+          return;
+        } catch (updateErr) {
+          // Message might be too old to edit (Slack limit) — post a new one
+          logger.debug(`Could not update live message, posting new: ${updateErr}`);
+          this.liveMessages.delete(projectId);
+        }
+      }
+
+      // Post a new message and track it
+      const result = await this.client.chat.postMessage({
+        channel: channelId,
+        text: formatted,
+      });
+
+      if (result.ts) {
+        this.liveMessages.set(projectId, { ts: result.ts, text });
+      }
+    } catch (err) {
+      logger.warn(`Failed to post live output to Slack: ${err}`);
+    }
+  }
+
+  /**
+   * Clear the live message tracker for a project (e.g., when worker stops).
+   * The next output will start a fresh message.
+   */
+  clearLiveMessage(projectId: string): void {
+    this.liveMessages.delete(projectId);
   }
 
   // ---------------------------------------------------------------------------
@@ -250,6 +320,7 @@ export class SlackBot {
           return `:warning: No active worker for ${projectName}`;
         }
         await this.workerManager.pause(worker.id);
+        this.clearLiveMessage(project.id);
         return `:pause_button: *${projectName}* paused. Just say "resume" when you're ready.`;
       }
 
@@ -276,6 +347,7 @@ export class SlackBot {
           return `:white_circle: *${projectName}* is already idle.`;
         }
         await this.workerManager.stop(worker.id);
+        this.clearLiveMessage(project.id);
         return `:stop_button: *${projectName}* stopped.`;
       }
 

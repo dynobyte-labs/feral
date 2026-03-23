@@ -39,7 +39,10 @@ export class WorkerManager {
 
   /** Tracks last seen tmux output per worker to detect new content */
   private lastOutput: Map<string, string> = new Map();
+  /** Accumulates new output per worker for debounced delivery */
+  private pendingOutput: Map<string, string> = new Map();
   private pollInterval: ReturnType<typeof setInterval> | null = null;
+  private flushInterval: ReturnType<typeof setInterval> | null = null;
   private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(projectManager: ProjectManager) {
@@ -119,8 +122,9 @@ export class WorkerManager {
 
   /**
    * Strip Claude Code TUI chrome from captured pane content.
-   * Removes status bars, box-drawing decorations, and other non-content lines
-   * so only meaningful output is forwarded to Slack.
+   * Removes status bars, box-drawing decorations, thinking indicators,
+   * spinners, tool-use headers, and other non-content lines so only
+   * meaningful Claude output is forwarded to Slack.
    */
   private stripTuiChrome(text: string): string {
     return text
@@ -129,14 +133,28 @@ export class WorkerManager {
         const trimmed = line.trim();
         // Skip empty lines
         if (!trimmed) return false;
-        // Skip status bar lines
+        // Skip status bar lines (bottom of TUI)
         if (/⏵⏵|bypass permissions|shift\+tab|esc to interrupt/i.test(trimmed)) return false;
         // Skip lines that are only box-drawing / decoration
-        if (/^[╭╰╮╯│─┌┐└┘├┤┬┴┼═║╔╗╚╝╠╣╦╩╬\s─]+$/.test(trimmed)) return false;
+        if (/^[╭╰╮╯│─┌┐└┘├┤┬┴┼═║╔╗╚╝╠╣╦╩╬\s─═▌▐▛▜▝▘]+$/.test(trimmed)) return false;
         // Skip the bare prompt character
         if (/^❯\s*$/.test(trimmed)) return false;
         // Skip effort/mode indicators
-        if (/^◐|medium\s*·\s*\/effort/i.test(trimmed)) return false;
+        if (/^◐|medium\s*·\s*\/effort|·\s*\/effort/i.test(trimmed)) return false;
+        // Skip thinking/spinner indicators
+        if (/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏●◉◌⣾⣽⣻⢿⡿⣟⣯⣷⠀⠁⠂⠃⠄⠅⠆⠇]\s*(thinking|processing|working)/i.test(trimmed)) return false;
+        // Skip bare spinner characters (braille animation frames)
+        if (/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷]\s*$/.test(trimmed)) return false;
+        // Skip "Thinking..." or "◌ Thinking" lines
+        if (/^[◌●◉]?\s*(Thinking|Processing|Working)\.*$/i.test(trimmed)) return false;
+        // Skip tool use header decorations ("── Read ──", "── Bash ──", etc.)
+        if (/^─+\s*(Read|Write|Edit|Bash|Glob|Grep|Agent|TodoWrite|Search)\s*─+$/i.test(trimmed)) return false;
+        // Skip welcome banner content
+        if (/Welcome back|Tips for getting started|Run \/init|Recent activity|No recent activity|Opus.*context|Claude Max|now defaults to/i.test(trimmed)) return false;
+        // Skip version/session info
+        if (/^Claude Code v[\d.]+|pmseltmann@gmail\.com/i.test(trimmed)) return false;
+        // Skip project path display
+        if (/^~\/projects\//i.test(trimmed)) return false;
         return true;
       })
       .join("\n")
@@ -145,12 +163,22 @@ export class WorkerManager {
 
   /**
    * Start polling active workers for new output.
-   * Calls onOutput(projectId, newText) whenever a worker produces new content.
-   * Filters out TUI chrome (status bars, box decorations) before forwarding.
+   *
+   * Uses a two-stage approach to avoid Slack message spam:
+   * 1. POLL (every pollIntervalMs): capture tmux, diff against last, accumulate new content
+   * 2. FLUSH (every flushIntervalMs): deliver accumulated content to the callback
+   *
+   * This means while Claude is actively working (thinking, running tools, writing code),
+   * output accumulates and gets delivered as one batch instead of many small messages.
    */
-  startOutputPolling(onOutput: (projectId: string, text: string) => void, intervalMs = 3000): void {
+  startOutputPolling(
+    onOutput: (projectId: string, text: string) => void,
+    pollIntervalMs = 2000,
+    flushIntervalMs = 8000
+  ): void {
     if (this.pollInterval) return;
 
+    // Stage 1: Poll tmux and accumulate new content
     this.pollInterval = setInterval(() => {
       const activeWorkers = this.listActive();
       for (const worker of activeWorkers) {
@@ -164,33 +192,49 @@ export class WorkerManager {
           const rawCapture = this.tmuxCapture(tmuxSession);
           if (!rawCapture) continue;
 
-          // Compare raw captures to detect any change
           const lastRaw = this.lastOutput.get(worker.id) ?? "";
           if (rawCapture === lastRaw) continue;
 
-          // Strip TUI chrome from both old and new, then diff
           const currentClean = this.stripTuiChrome(rawCapture);
           const lastClean = this.stripTuiChrome(lastRaw);
 
           this.lastOutput.set(worker.id, rawCapture);
 
           if (currentClean !== lastClean && currentClean.length > 0) {
-            // Extract only the new portion
             const newContent = currentClean.length > lastClean.length
               ? currentClean.slice(lastClean.length).trim()
               : currentClean.trim();
 
             if (newContent.length > 0) {
-              onOutput(worker.project_id, newContent);
+              // Accumulate instead of sending immediately
+              const existing = this.pendingOutput.get(worker.project_id) ?? "";
+              this.pendingOutput.set(
+                worker.project_id,
+                existing ? `${existing}\n${newContent}` : newContent
+              );
             }
           }
         } catch (err) {
           logger.debug(`Output poll error for worker ${worker.id}: ${err}`);
         }
       }
-    }, intervalMs);
+    }, pollIntervalMs);
 
-    logger.info(`Worker output polling started (every ${intervalMs}ms)`);
+    // Stage 2: Flush accumulated output to Slack
+    this.flushInterval = setInterval(() => {
+      for (const [projectId, text] of this.pendingOutput.entries()) {
+        if (text.length > 0) {
+          // Truncate very long output to avoid Slack message limits
+          const truncated = text.length > 3500
+            ? `...\n${text.slice(-3500)}`
+            : text;
+          onOutput(projectId, truncated);
+        }
+      }
+      this.pendingOutput.clear();
+    }, flushIntervalMs);
+
+    logger.info(`Worker output polling started (poll: ${pollIntervalMs}ms, flush: ${flushIntervalMs}ms)`);
   }
 
   stopOutputPolling(): void {
@@ -198,6 +242,11 @@ export class WorkerManager {
       clearInterval(this.pollInterval);
       this.pollInterval = null;
     }
+    if (this.flushInterval) {
+      clearInterval(this.flushInterval);
+      this.flushInterval = null;
+    }
+    this.pendingOutput.clear();
   }
 
   // ---------------------------------------------------------------------------
