@@ -10,6 +10,9 @@ const envSchema = z.object({
   SLACK_APP_TOKEN: z.string().optional(),
   SLACK_OWNER_ID: z.string().optional(),
 
+  DISCORD_BOT_TOKEN: z.string().optional(),
+  DISCORD_GUILD_ID: z.string().optional(),
+
   GITHUB_TOKEN: z.string().optional(),
   GITHUB_ORG: z.string().optional(),
 
@@ -50,6 +53,12 @@ export const config = {
     appToken: env.SLACK_APP_TOKEN,
     ownerId: env.SLACK_OWNER_ID,
     enabled: !!(env.SLACK_BOT_TOKEN && env.SLACK_APP_TOKEN),
+  },
+
+  discord: {
+    botToken: env.DISCORD_BOT_TOKEN,
+    guildId: env.DISCORD_GUILD_ID,
+    enabled: !!env.DISCORD_BOT_TOKEN,
   },
 
   github: {

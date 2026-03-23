@@ -7,6 +7,7 @@ import { logger } from "./logger.js";
 import { ProjectManager } from "./managers/project-manager.js";
 import { WorkerManager } from "./managers/worker-manager.js";
 import { SlackBot } from "./bot/slack-bot.js";
+import { DiscordBot } from "./bot/discord-bot.js";
 import { createRouter } from "./api/routes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -57,7 +58,7 @@ async function main() {
     logger.info(`Dashboard: http://localhost:${config.port}`);
   });
 
-  // Start Slack bot (non-fatal — server works without Slack)
+  // Start chat integrations (non-fatal — server works without them)
   try {
     const slackBot = new SlackBot(projectManager, workerManager);
     await slackBot.start();
@@ -67,6 +68,18 @@ async function main() {
       logger.error("Feral will continue running without Slack integration.");
     } else {
       logger.info("Slack not configured — running without Slack integration.");
+    }
+  }
+
+  try {
+    const discordBot = new DiscordBot(projectManager, workerManager);
+    await discordBot.start();
+  } catch (err) {
+    if (config.discord.enabled) {
+      logger.error(`Discord bot failed to start: ${err}`);
+      logger.error("Feral will continue running without Discord integration.");
+    } else {
+      logger.info("Discord not configured — running without Discord integration.");
     }
   }
 

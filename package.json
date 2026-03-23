@@ -1,7 +1,7 @@
 {
   "name": "feral",
   "version": "0.1.0",
-  "description": "Unleash Claude Code on a dedicated machine. Run a team of AI developers safely in dangerous mode, managed from Slack.",
+  "description": "Unleash Claude Code on a dedicated machine. Run a team of AI developers safely in dangerous mode, managed from Slack or Discord.",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

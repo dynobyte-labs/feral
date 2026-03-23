@@ -18,6 +18,7 @@ db.exec(`
     path        TEXT NOT NULL,
     repo_url    TEXT,
     slack_channel_id TEXT,
+    discord_channel_id TEXT,
     template    TEXT DEFAULT 'empty',
     description TEXT DEFAULT '',
     status      TEXT DEFAULT 'idle' CHECK(status IN ('idle', 'active', 'paused', 'archived')),
@@ -60,6 +61,13 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id);
   CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
 `);
+
+// Migrations for existing databases (safe to re-run)
+try {
+  db.exec(`ALTER TABLE projects ADD COLUMN discord_channel_id TEXT`);
+} catch {
+  // Column already exists — that's fine
+}
 
 // Prepared statements for common operations
 export const queries = {

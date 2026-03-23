@@ -14,6 +14,7 @@ export interface Project {
   path: string;
   repo_url: string | null;
   slack_channel_id: string | null;
+  discord_channel_id: string | null;
   template: string;
   description: string;
   status: string;
@@ -171,6 +172,11 @@ export class ProjectManager {
 
   setSlackChannel(id: string, channelId: string): void {
     db.prepare("UPDATE projects SET slack_channel_id = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(channelId, id);
+  }
+
+  setDiscordChannel(id: string, channelId: string): void {
+    db.prepare("UPDATE projects SET discord_channel_id = ?, updated_at = datetime('now') WHERE id = ?")
       .run(channelId, id);
   }
 

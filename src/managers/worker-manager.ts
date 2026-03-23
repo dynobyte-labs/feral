@@ -43,6 +43,8 @@ export class WorkerManager {
   private pendingOutput: Map<string, string> = new Map();
   /** Tracks whether the worker's prompt (❯) is currently visible — i.e. Claude is idle */
   private workerReady: Map<string, boolean> = new Map();
+  /** Output listeners — multiple adapters (Slack + Discord) can register */
+  private outputListeners: Array<(projectId: string, text: string, isFinal: boolean) => void> = [];
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private flushInterval: ReturnType<typeof setInterval> | null = null;
   private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
@@ -178,7 +180,9 @@ export class WorkerManager {
     pollIntervalMs = 2000,
     flushIntervalMs = 8000
   ): void {
-    if (this.pollInterval) return;
+    // Support multiple listeners (e.g. Slack + Discord both running)
+    this.outputListeners.push(onOutput);
+    if (this.pollInterval) return; // Polling already running, just added listener
 
     // Stage 1: Poll tmux and accumulate new content
     this.pollInterval = setInterval(() => {
@@ -230,7 +234,7 @@ export class WorkerManager {
               const truncated = pendingText.length > 3500
                 ? `...\n${pendingText.slice(-3500)}`
                 : pendingText;
-              onOutput(worker.project_id, truncated, true);
+              for (const listener of this.outputListeners) listener(worker.project_id, truncated, true);
               this.pendingOutput.delete(worker.project_id);
             }
           }
@@ -248,7 +252,7 @@ export class WorkerManager {
           const truncated = text.length > 3500
             ? `...\n${text.slice(-3500)}`
             : text;
-          onOutput(projectId, truncated, false);
+          for (const listener of this.outputListeners) listener(projectId, truncated, false);
         }
       }
       this.pendingOutput.clear();
@@ -267,6 +271,7 @@ export class WorkerManager {
       this.flushInterval = null;
     }
     this.pendingOutput.clear();
+    this.outputListeners = [];
   }
 
   // ---------------------------------------------------------------------------
