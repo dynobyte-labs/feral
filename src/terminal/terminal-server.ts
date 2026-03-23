@@ -16,11 +16,19 @@ import { isValidWsToken } from "../api/auth.js";
 import { config } from "../config.js";
 
 // node-pty is optional — try to load it
-let nodePty: any = null;
+let ptySpawn: ((file: string, args: string[], opts: any) => any) | null = null;
 try {
-  nodePty = await import("node-pty");
-} catch {
-  logger.info("node-pty not available — web terminal will use tmux polling mode (install node-pty for full PTY support)");
+  const mod = await import("node-pty");
+  // Handle both ESM default export and CommonJS module.exports
+  const ns = mod.default || mod;
+  if (typeof ns.spawn === "function") {
+    ptySpawn = ns.spawn.bind(ns);
+    logger.info("node-pty loaded — web terminal will use full PTY mode");
+  } else {
+    logger.warn(`node-pty loaded but spawn not found (keys: ${Object.keys(ns).join(", ")})`);
+  }
+} catch (err) {
+  logger.info(`node-pty not available — web terminal will use tmux polling mode (${err})`);
 }
 
 interface TerminalSession {
@@ -94,21 +102,16 @@ export function attachTerminalServer(
 
     logger.info(`Web terminal connected: ${projectName}`);
 
-    if (nodePty) {
+    if (ptySpawn) {
       // Full PTY mode — proper terminal emulation
-      const ptySpawn = nodePty.spawn || nodePty.default?.spawn;
-      if (!ptySpawn) {
-        ws.send(JSON.stringify({ error: "node-pty loaded but spawn not found" }));
-        ws.close();
-        return;
-      }
-
-      const pty = ptySpawn("tmux", ["attach-session", "-t", tmuxSession], {
+      logger.info(`Spawning PTY: tmux attach-session -d -t ${tmuxSession}`);
+      const pty = ptySpawn("tmux", ["attach-session", "-d", "-t", tmuxSession], {
         name: "xterm-256color",
         cols: 200,
         rows: 50,
-        env: process.env as Record<string, string>,
+        env: { ...process.env, TERM: "xterm-256color" } as Record<string, string>,
       });
+      logger.info(`PTY spawned (pid: ${pty.pid})`);
 
       const session: TerminalSession = { projectId: project.id, projectName: project.name, pty, ws };
       activeSessions.set(ws, session);
@@ -119,10 +122,19 @@ export function attachTerminalServer(
         }
       });
 
-      pty.onExit(() => {
-        logger.info(`Web terminal PTY exited: ${projectName}`);
+      pty.onExit(({ exitCode }: { exitCode: number }) => {
+        logger.info(`Web terminal PTY exited: ${projectName} (code: ${exitCode})`);
         if (ws.readyState === WebSocket.OPEN) {
           ws.send("\r\n\x1b[33m[Terminal session ended]\x1b[0m\r\n");
+          ws.close();
+        }
+      });
+
+      // Catch spawn errors
+      pty.on?.("error", (err: Error) => {
+        logger.error(`PTY error for ${projectName}: ${err.message}`);
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ error: `Terminal error: ${err.message}` }));
           ws.close();
         }
       });
