@@ -211,13 +211,26 @@ Discord uses native slash commands with autocomplete:
 
 ## Remote Access & Security
 
-The dashboard, web terminal, and API all run on the same port (default 3000). For remote access:
+> **⚠️ NEVER expose Feral directly to the public internet.** Feral runs Claude Code in dangerous mode with full shell access. An exposed instance means anyone on the internet can execute arbitrary commands on your machine — read files, install software, exfiltrate data, or worse. In early 2026, over 30,000 OpenClaw AI instances were discovered exposed to the internet with no authentication, giving attackers remote code execution on every single one. Don't be that. Always use a VPN like Tailscale.
 
-**Tailscale (recommended):** Install Tailscale on both the Feral machine and your devices. Access the dashboard at `http://your-mac.tailnet-name.ts.net:3000`. Traffic is encrypted via WireGuard, and only your devices can reach it.
+The dashboard, web terminal, and API all run on the same port (default 3000). **They should only be reachable from trusted networks.**
 
-**Dashboard token auth:** Set `DASHBOARD_TOKEN` in `.env` to require authentication. Visitors see a login page and need the token to access the dashboard, terminal, or API. The token is stored in an HttpOnly cookie for 30 days. API clients can use `Authorization: Bearer <token>`. The `/api/health` endpoint is always public for monitoring.
+**Tailscale (required for remote access):** Install [Tailscale](https://tailscale.com) on both the Feral machine and your devices. Access the dashboard at `http://your-mac.tailnet-name.ts.net:3000`. Traffic is encrypted end-to-end via WireGuard, and only devices on your tailnet can reach it. No ports are exposed to the public internet. The free tier supports up to 100 devices. This is your primary security boundary.
 
-**Web terminal:** Access any worker's Claude Code TUI at `http://your-mac:3000/terminal?project=<name>`. Full interactive terminal in the browser — no SSH needed. Protected by the same dashboard token when set.
+**Dashboard token auth (optional extra layer):** Set `DASHBOARD_TOKEN` in `.env` to add application-level authentication on top of Tailscale. Visitors see a login page and need the token to access the dashboard, terminal, or API. The token is stored in an HttpOnly cookie for 30 days. API clients can use `Authorization: Bearer <token>`. The `/api/health` endpoint is always public for monitoring. With Tailscale in place, this is belt-and-suspenders — useful if you share your tailnet with others.
+
+**Web terminal:** Access any worker's Claude Code TUI at `http://your-mac:3000/terminal?project=<name>`. Full interactive terminal in the browser — no SSH needed. Protected by Tailscale network access and optionally by the dashboard token.
+
+**Dashboard URL for chat:** Set `DASHBOARD_URL` in `.env` to your Tailscale address (e.g. `http://mac-mini.tail1234.ts.net:3000`). Then use `!dashboard` in Slack or `/feral dashboard` in Discord to get a clickable link to the dashboard and terminal from chat.
+
+### What NOT to do
+
+- **Do not** use ngrok, Cloudflare Tunnel, or any reverse proxy to expose Feral to the internet
+- **Do not** put Feral behind a public load balancer or CDN
+- **Do not** forward port 3000 on your router
+- **Do not** bind to `0.0.0.0` on a machine with a public IP
+- **Do not** rely solely on `DASHBOARD_TOKEN` without a VPN — tokens can be brute-forced, leaked in logs, or stolen from browser history
+- **Do not** run Feral on a cloud VM with a public IP unless it's locked behind a VPN or security group with no public ingress
 
 ## Dedicated Machine Setup
 
@@ -252,6 +265,8 @@ http://your-mac.tailnet-name.ts.net:3000
 
 ## Security
 
+> **⚠️ USE AT YOUR OWN RISK.** Feral is experimental software that runs AI agents with unrestricted system access. It is provided "as is" with no warranty of any kind. The authors are not responsible for any damage, data loss, security breaches, financial costs, or other harm resulting from the use of this software. You are solely responsible for securing your deployment. By using Feral, you accept full responsibility for any consequences.
+
 Feral runs Claude Code with `--dangerously-skip-permissions`. That flag exists for a reason — it gives Claude full, unrestricted access to the filesystem, shell, and network. The security model is simple: **the machine itself is the sandbox.**
 
 ### The Expendable Machine Strategy
@@ -278,6 +293,8 @@ This blocks commits containing Anthropic API keys, Slack tokens, GitHub PATs, Op
 
 ### What to Watch For
 
+**Exposed dashboard/API** — This is the #1 risk. Feral's API allows spawning workers, sending arbitrary commands, and accessing a full interactive terminal. If this is reachable from the internet, anyone can run arbitrary code on your machine. Always use Tailscale or another VPN. Never expose port 3000 publicly.
+
 **API key exposure** — Your Anthropic key lives in `.env` on the machine. A rogue Claude Code session could theoretically read it and include it in output. Use a separate API key for Feral, and the pre-commit hook will catch accidental commits.
 
 **GitHub token scope** — Use a fine-grained PAT scoped only to repos under your org, with minimal permissions (contents + pull requests). Never use a classic token with full repo access.
@@ -286,12 +303,31 @@ This blocks commits containing Anthropic API keys, Slack tokens, GitHub PATs, Op
 
 **Bot tokens** — If your Slack or Discord bot token is compromised, someone could post as your bot. Consider using a dedicated workspace/server for Feral, or limit the bot's channel scope.
 
-### What's NOT a Risk
+**Unattended operation** — Workers run autonomously and can make mistakes: deleting files, overwriting code, running expensive operations, or making unintended API calls. Monitor worker output regularly, use git branches for isolation, and review changes before merging.
 
-- Claude Code can't escape the machine — it runs in a terminal process
-- It can't access your laptop, phone, or other devices on your network
+### What's NOT a Risk (with proper setup)
+
+- Claude Code can't escape the machine — it runs in a terminal process with no access to other devices
+- It can't access your laptop, phone, or other machines on your network (Tailscale doesn't bridge local networks by default)
 - It can't spend beyond your Anthropic API plan limits
 - If it breaks the OS, you factory reset and you're back in 30 minutes
+- The dashboard and terminal are unreachable from outside your tailnet
+
+**These assumptions only hold if you follow the setup instructions.** If you skip Tailscale, expose the port publicly, or run on a machine with sensitive data, the risk profile changes dramatically.
+
+### Security Checklist
+
+Before running Feral, verify:
+
+- [ ] Tailscale is installed and running on the Feral machine
+- [ ] Port 3000 is **not** forwarded on your router
+- [ ] No ngrok, Cloudflare Tunnel, or reverse proxy is pointing at Feral
+- [ ] macOS firewall is enabled with stealth mode (`scripts/setup-macos.sh` does this)
+- [ ] The machine has no personal data, Apple ID, or browser logins
+- [ ] GitHub PAT is fine-grained and scoped to your org only
+- [ ] Anthropic API key is separate from your personal key
+- [ ] Pre-commit hooks are installed (`scripts/install-hooks.sh`)
+- [ ] You're monitoring worker output for unexpected behavior
 
 ### Weekly Maintenance
 
