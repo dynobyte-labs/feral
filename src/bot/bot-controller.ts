@@ -392,10 +392,10 @@ export class BotController {
       lines.push(`⌨️ **Terminal:** ${base}/terminal?project=${encodeURIComponent(projectName)}`);
     }
 
-    if (base.includes("localhost")) {
+    if (!process.env.DASHBOARD_URL) {
       lines.push(
         "",
-        "_Tip: Set `DASHBOARD_URL` in .env to your Tailscale address (e.g. `http://mac-mini.tail1234.ts.net:3000`) so these links work from anywhere. No password needed — Tailscale handles access._",
+        "_Tip: Set `DASHBOARD_URL` in .env to your Tailscale address (e.g. `http://mac-mini.tail1234.ts.net:3000`) so these links work from anywhere._",
       );
     }
 

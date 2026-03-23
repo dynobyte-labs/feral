@@ -36,6 +36,20 @@ function expandHome(filepath: string): string {
   return filepath;
 }
 
+/** Get the first non-internal IPv4 address (local network IP). */
+function getLocalIp(): string {
+  const interfaces = os.networkInterfaces();
+  for (const iface of Object.values(interfaces)) {
+    if (!iface) continue;
+    for (const addr of iface) {
+      if (addr.family === "IPv4" && !addr.internal) {
+        return addr.address;
+      }
+    }
+  }
+  return "localhost";
+}
+
 const parsed = envSchema.safeParse(process.env);
 
 if (!parsed.success) {
@@ -67,7 +81,7 @@ export const config = {
   dashboard: {
     token: env.DASHBOARD_TOKEN,
     authEnabled: !!env.DASHBOARD_TOKEN,
-    url: env.DASHBOARD_URL || `http://localhost:${env.PORT}`,
+    url: env.DASHBOARD_URL || `http://${getLocalIp()}:${env.PORT}`,
   },
 
   github: {
