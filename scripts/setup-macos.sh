@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # Feral — macOS Setup Script
-# Run on a fresh Mac Mini M4 (or any Apple Silicon Mac) dedicated to dev work.
+# Run on any Apple Silicon Mac dedicated to dev work.
 # Usage: bash scripts/setup-macos.sh
 # =============================================================================
 set -e
@@ -76,6 +76,7 @@ if [ ! -d "$FERAL_DIR" ]; then
 fi
 cd "$FERAL_DIR"
 npm install
+npm install node-pty  # native PTY support for the web terminal
 mkdir -p data ~/projects
 
 # Create .env from example if it doesn't exist
