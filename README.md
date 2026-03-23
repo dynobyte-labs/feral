@@ -87,6 +87,9 @@ SLACK_APP_TOKEN=xapp-...           # For Slack socket mode
 DISCORD_BOT_TOKEN=...              # For Discord integration
 DISCORD_GUILD_ID=...               # Your server ID (recommended for instant slash command registration)
 
+# Dashboard auth (optional — set to require a token for web access)
+DASHBOARD_TOKEN=...                # Any secret string. Leave blank for open access.
+
 # Other
 GITHUB_TOKEN=ghp_...               # For auto repo creation
 ```
@@ -205,6 +208,16 @@ Discord uses native slash commands with autocomplete:
 8. If discord.js isn't already installed: `npm install discord.js`
 
 9. Start Feral — slash commands register automatically. With a `DISCORD_GUILD_ID` they appear instantly; without it, global commands can take up to an hour.
+
+## Remote Access & Security
+
+The dashboard, web terminal, and API all run on the same port (default 3000). For remote access:
+
+**Tailscale (recommended):** Install Tailscale on both the Feral machine and your devices. Access the dashboard at `http://your-mac.tailnet-name.ts.net:3000`. Traffic is encrypted via WireGuard, and only your devices can reach it.
+
+**Dashboard token auth:** Set `DASHBOARD_TOKEN` in `.env` to require authentication. Visitors see a login page and need the token to access the dashboard, terminal, or API. The token is stored in an HttpOnly cookie for 30 days. API clients can use `Authorization: Bearer <token>`. The `/api/health` endpoint is always public for monitoring.
+
+**Web terminal:** Access any worker's Claude Code TUI at `http://your-mac:3000/terminal?project=<name>`. Full interactive terminal in the browser — no SSH needed. Protected by the same dashboard token when set.
 
 ## Dedicated Machine Setup
 
@@ -325,10 +338,14 @@ feral/
 │   │   ├── slack-bot.ts          # Slack adapter (Bolt, !commands, @mentions)
 │   │   ├── discord-bot.ts        # Discord adapter (slash commands, threads)
 │   │   └── chat-nlu.ts           # Natural language intent parsing (Haiku)
-│   └── api/
-│       └── routes.ts             # Express REST API
+│   ├── api/
+│   │   ├── routes.ts             # Express REST API
+│   │   └── auth.ts               # Token auth middleware + login page
+│   └── terminal/
+│       └── terminal-server.ts    # WebSocket terminal (xterm.js backend)
 ├── dashboard/
-│   └── index.html                # Web dashboard (vanilla HTML/JS)
+│   ├── index.html                # Web dashboard (vanilla HTML/JS)
+│   └── terminal.html             # Web terminal (xterm.js)
 ├── scripts/
 │   ├── setup-macos.sh            # Full macOS setup for dedicated machine
 │   ├── install-launchd.sh        # Auto-start on boot

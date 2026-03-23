@@ -13,6 +13,8 @@ const envSchema = z.object({
   DISCORD_BOT_TOKEN: z.string().optional(),
   DISCORD_GUILD_ID: z.string().optional(),
 
+  DASHBOARD_TOKEN: z.string().optional(),
+
   GITHUB_TOKEN: z.string().optional(),
   GITHUB_ORG: z.string().optional(),
 
@@ -59,6 +61,11 @@ export const config = {
     botToken: env.DISCORD_BOT_TOKEN,
     guildId: env.DISCORD_GUILD_ID,
     enabled: !!env.DISCORD_BOT_TOKEN,
+  },
+
+  dashboard: {
+    token: env.DASHBOARD_TOKEN,
+    authEnabled: !!env.DASHBOARD_TOKEN,
   },
 
   github: {

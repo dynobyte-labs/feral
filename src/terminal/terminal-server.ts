@@ -12,6 +12,8 @@ import { spawn, execSync, ChildProcess } from "child_process";
 import { logger } from "../logger.js";
 import { ProjectManager } from "../managers/project-manager.js";
 import { WorkerManager } from "../managers/worker-manager.js";
+import { isValidWsToken } from "../api/auth.js";
+import { config } from "../config.js";
 
 // node-pty is optional — try to load it
 let nodePty: any = null;
@@ -53,6 +55,20 @@ export function attachTerminalServer(
 
   wss.on("connection", (ws, req) => {
     const url = new URL(req.url || "/", `http://${req.headers.host}`);
+
+    // Auth check — token from query param or cookie
+    if (config.dashboard.authEnabled) {
+      const token = url.searchParams.get("token");
+      const cookieHeader = req.headers.cookie || "";
+      const cookieToken = cookieHeader.split(";").find(c => c.trim().startsWith("feral_token="))?.split("=")[1]?.trim();
+
+      if (!isValidWsToken(token || cookieToken || null)) {
+        ws.send(JSON.stringify({ error: "Unauthorized. Include ?token= or sign in to the dashboard first." }));
+        ws.close();
+        return;
+      }
+    }
+
     const projectName = url.searchParams.get("project");
 
     if (!projectName) {

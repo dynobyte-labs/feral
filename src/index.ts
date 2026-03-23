@@ -10,6 +10,7 @@ import { createServer } from "http";
 import { SlackBot } from "./bot/slack-bot.js";
 import { DiscordBot } from "./bot/discord-bot.js";
 import { createRouter } from "./api/routes.js";
+import { authMiddleware, registerAuthRoutes } from "./api/auth.js";
 import { attachTerminalServer } from "./terminal/terminal-server.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -30,6 +31,18 @@ async function main() {
   const app = express();
   app.use(cors());
   app.use(express.json());
+  app.use(express.urlencoded({ extended: false })); // for login form
+
+  // Auth: register login/logout routes, then protect everything else
+  registerAuthRoutes(app);
+  app.use(authMiddleware);
+
+  if (config.dashboard.authEnabled) {
+    logger.info("Dashboard auth enabled (DASHBOARD_TOKEN is set)");
+  } else {
+    logger.info("Dashboard auth disabled (no DASHBOARD_TOKEN — open access)");
+  }
+
   app.use(createRouter(projectManager, workerManager));
 
   // Serve dashboard static files
