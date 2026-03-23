@@ -141,13 +141,15 @@ export function attachTerminalServer(
         pty.write(msg);
       });
     } else {
-      // Basic mode — use `script` to wrap in a pseudo-terminal
-      const isLinux = process.platform === "linux";
-      const args = isLinux
-        ? ["-qfc", `tmux attach-session -t "${tmuxSession}"`, "/dev/null"]
-        : ["-q", "/dev/null", "tmux", "attach-session", "-t", tmuxSession];
+      // Basic mode — use Python's pty module for a real pseudo-terminal.
+      // The `script` command doesn't properly relay piped stdin on macOS.
+      const pyCmd = [
+        "import pty, sys, os;",
+        `os.environ['TERM']='xterm-256color';`,
+        `pty.spawn(['tmux','attach-session','-t','${tmuxSession}'])`,
+      ].join(" ");
 
-      const proc = spawn("script", args, {
+      const proc = spawn("python3", ["-c", pyCmd], {
         stdio: ["pipe", "pipe", "pipe"],
         env: { ...process.env, TERM: "xterm-256color" },
       });
