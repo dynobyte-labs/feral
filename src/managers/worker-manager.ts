@@ -274,8 +274,10 @@ export class WorkerManager {
   // ---------------------------------------------------------------------------
 
   /**
-   * Periodically check that active workers still have live tmux sessions.
-   * Mark workers as errored if their session has disappeared.
+   * Periodically check that active workers still have live Claude Code processes.
+   * Detects both missing tmux sessions AND Claude Code exiting inside a live session
+   * (the startup script keeps the tmux alive with `sleep 86400` after Claude exits,
+   * writing ___FERAL_CLAUDE_EXITED___ as a marker).
    */
   startHealthCheck(intervalMs = 15000): void {
     if (this.healthCheckInterval) return;
@@ -288,12 +290,29 @@ export class WorkerManager {
           if (!project) continue;
 
           const tmuxSession = `feral-${project.name}`;
+
           if (!this.tmuxSessionExists(tmuxSession)) {
             logger.warn(`Worker ${worker.id} (${project.name}): tmux session '${tmuxSession}' is gone — marking as error`);
             queries.updateWorkerStatus.run("error", worker.id);
             queries.addEvent.run(worker.project_id, worker.id, "worker_error", "tmux session disappeared unexpectedly");
             this.projectManager.setStatus(worker.project_id, "idle");
             this.lastOutput.delete(worker.id);
+            this.workerReady.delete(worker.id);
+            continue;
+          }
+
+          // Session exists but Claude Code may have exited (idle timeout, crash, etc.)
+          // The startup script prints ___FERAL_CLAUDE_EXITED___ when claude exits.
+          const pane = this.tmuxCapture(tmuxSession, 20);
+          if (pane.includes("___FERAL_CLAUDE_EXITED___")) {
+            logger.warn(`Worker ${worker.id} (${project.name}): Claude Code process exited (idle timeout?) — marking as stopped`);
+            // Kill the stale tmux session so resume gets a clean start
+            try { execSync(`tmux kill-session -t "${tmuxSession}" 2>/dev/null`); } catch { /* ignore */ }
+            queries.updateWorkerStatus.run("stopped", worker.id);
+            queries.addEvent.run(worker.project_id, worker.id, "worker_stopped", "Claude Code process exited (likely idle timeout)");
+            this.projectManager.setStatus(worker.project_id, "idle");
+            this.lastOutput.delete(worker.id);
+            this.workerReady.delete(worker.id);
           }
         } catch (err) {
           logger.debug(`Health check error for worker ${worker.id}: ${err}`);

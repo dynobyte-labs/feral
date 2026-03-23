@@ -737,6 +737,7 @@ export class SlackBot {
 
   /**
    * Direct routing: send message to a project's active worker.
+   * If the worker is dead/stopped/errored, auto-resumes it.
    * If the worker is still starting up, waits briefly for it to become ready.
    */
   private async routeToWorker(
@@ -745,9 +746,24 @@ export class SlackBot {
     say: (msg: string) => Promise<unknown>
   ): Promise<void> {
     let worker = this.workerManager.getForProject(projectId);
+
+    // No active worker — try to auto-resume
     if (!worker) {
-      await say(":warning: No active worker for this project. Use `!resume` to start one.");
-      return;
+      const project = this.projectManager.get(projectId);
+      if (!project) {
+        await say(":warning: Project not found.");
+        return;
+      }
+
+      await say(`:arrows_counterclockwise: Worker for *${project.name}* isn't running — auto-resuming... (this takes ~15s)`);
+      try {
+        worker = await this.workerManager.resume(projectId, text);
+        // Worker started with the user's message as the prompt, so we're done
+        return;
+      } catch (err) {
+        await say(`:x: Auto-resume failed: ${err}`);
+        return;
+      }
     }
 
     // If worker is still starting, wait up to 20s for it to become "running"
