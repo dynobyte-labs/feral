@@ -128,7 +128,7 @@
       lineHeight: 1.2,
       cursorBlink: true,
       cursorStyle: 'bar',
-      scrollback: 10000,
+      scrollback: 0, // Scrollback handled by tmux copy mode (Ctrl-B [), not xterm.js
     });
 
     const fitAddon = new FitAddon.FitAddon();

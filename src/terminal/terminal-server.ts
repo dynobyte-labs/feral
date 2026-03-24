@@ -193,19 +193,13 @@ export function attachTerminalServer(
         } catch { /* ignore */ }
       }
 
-      // Send scrollback history first so user can scroll up in xterm.js
-      try {
-        const scrollback = execSync(
-          `${TMUX_PATH} capture-pane -t "${tmuxSession}" -p -e -S -`,
-          { encoding: "utf-8", maxBuffer: 5 * 1024 * 1024 },
-        );
-        if (scrollback) {
-          // Send scrollback as plain text (not positioned) so it enters xterm scrollback buffer
-          ws.send(scrollback);
-        }
-      } catch { /* ignore */ }
+      // NOTE: We intentionally do NOT dump tmux scrollback into xterm.js's buffer.
+      // Mixing raw scrollback text with ANSI-positioned polling updates creates
+      // garbled output when the user scrolls up. Instead, users scroll within tmux
+      // itself using Ctrl-B then [ (tmux copy mode), which works perfectly since
+      // we forward the C-b prefix key.
 
-      // Then send the current visible screen positioned properly
+      // Send the current visible screen positioned properly
       try {
         const initial = execSync(
           `${TMUX_PATH} capture-pane -t "${tmuxSession}" -p -e`,
