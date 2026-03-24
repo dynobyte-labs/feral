@@ -257,6 +257,7 @@ export function attachTerminalServer(
             return;
           }
           if (parsed.type === "scroll") {
+            logger.debug(`Scroll event: ${parsed.direction} ${parsed.lines} lines (copyMode=${inCopyMode})`);
             try {
               const lines = Math.min(parsed.lines || 3, 20);
               if (parsed.direction === "up") {

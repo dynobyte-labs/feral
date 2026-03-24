@@ -138,9 +138,13 @@
     term.open(document.getElementById('terminal'));
     fitAddon.fit();
 
+    let ws = null;
+    let currentProject = null;
+
     // Intercept mouse wheel at DOCUMENT level in capture phase — this fires
     // before any element-level listener including xterm.js's internal handlers.
     // Without this, xterm.js converts wheel events to arrow key sequences.
+    // IMPORTANT: must be declared AFTER `let ws` above so the closure can access it.
     const termContainer = document.getElementById('terminal');
     document.addEventListener('wheel', (e) => {
       if (!termContainer.contains(e.target)) return; // only intercept inside terminal
@@ -152,9 +156,6 @@
       const lines = Math.max(1, Math.round(Math.abs(e.deltaY) / 30));
       ws.send(JSON.stringify({ type: 'scroll', direction, lines: Math.min(lines, 10) }));
     }, { capture: true, passive: false });
-
-    let ws = null;
-    let currentProject = null;
 
     const statusBadge = document.getElementById('statusBadge');
     const errorOverlay = document.getElementById('errorOverlay');
