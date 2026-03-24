@@ -80,7 +80,7 @@
     <span class="sep">|</span>
     <select id="projectSelect"><option value="">Loading projects...</option></select>
     <div class="topbar-right">
-      <span style="color: var(--muted); font-size: 11px;">Scroll: mouse wheel or Ctrl-B then [</span>
+      <span style="color: var(--muted); font-size: 11px;">Scroll: mouse wheel · Type anything to exit scroll mode</span>
       <span class="sep">|</span>
       <span id="statusBadge" class="status-badge connecting">Connecting</span>
     </div>
@@ -128,7 +128,7 @@
       lineHeight: 1.2,
       cursorBlink: true,
       cursorStyle: 'bar',
-      scrollback: 5000,
+      scrollback: 0, // Scrollback handled by tmux copy-mode via wheel events
     });
 
     const fitAddon = new FitAddon.FitAddon();
@@ -137,6 +137,16 @@
     term.loadAddon(webLinksAddon);
     term.open(document.getElementById('terminal'));
     fitAddon.fit();
+
+    // Intercept mouse wheel on the terminal and send scroll commands to tmux
+    const termEl = document.getElementById('terminal');
+    termEl.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const direction = e.deltaY < 0 ? 'up' : 'down';
+      const lines = Math.max(1, Math.round(Math.abs(e.deltaY) / 30));
+      ws.send(JSON.stringify({ type: 'scroll', direction, lines: Math.min(lines, 10) }));
+    }, { passive: false });
 
     let ws = null;
     let currentProject = null;

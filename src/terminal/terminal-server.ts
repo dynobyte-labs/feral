@@ -193,34 +193,9 @@ export function attachTerminalServer(
         } catch { /* ignore */ }
       }
 
-      // Scrollback strategy: use xterm.js's alternate screen buffer for live polling.
-      // 1. Send scrollback history as clean text into the NORMAL buffer (scrollable)
-      // 2. Switch to ALTERNATE screen buffer (like vim/tmux do)
-      // 3. All positioned polling happens in the alternate buffer
-      // When the user scrolls up in xterm.js, they see the clean scrollback history.
-
-      // Step 1: Send scrollback into normal buffer
-      try {
-        const rawScrollback = execSync(
-          `${TMUX_PATH} capture-pane -t "${tmuxSession}" -p -S -`,
-          { encoding: "utf-8", maxBuffer: 5 * 1024 * 1024 },
-        );
-        if (rawScrollback && rawScrollback.trim()) {
-          // Strip all ANSI escape sequences for clean scrollback
-          const stripped = rawScrollback.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-          const lines = stripped.split("\n");
-          // Trim trailing empty lines
-          while (lines.length > 0 && lines[lines.length - 1].trim() === "") {
-            lines.pop();
-          }
-          if (lines.length > 0) {
-            ws.send(lines.join("\r\n") + "\r\n");
-          }
-        }
-      } catch { /* ignore */ }
-
-      // Step 2: Switch to alternate screen buffer — scrollback stays in normal buffer
-      ws.send("\x1b[?1049h");
+      // Scrollback is handled by tmux copy-mode, triggered by mouse wheel
+      // events from the browser (see "scroll" message handler below).
+      // No xterm.js scrollback — tmux renders everything and polling captures it.
 
       // Send the current visible screen positioned properly
       try {
@@ -267,6 +242,8 @@ export function attachTerminalServer(
       const session: TerminalSession = { projectId: project.id, projectName: project.name, pollTimer, ws };
       activeSessions.set(ws, session);
 
+      let inCopyMode = false;
+
       ws.on("message", (data) => {
         const msg = data.toString();
         try {
@@ -279,8 +256,42 @@ export function attachTerminalServer(
             } catch { /* ignore — window may not resize if other clients attached */ }
             return;
           }
+          if (parsed.type === "scroll") {
+            try {
+              const lines = Math.min(parsed.lines || 3, 20);
+              if (parsed.direction === "up") {
+                // Enter copy mode if not already (idempotent)
+                if (!inCopyMode) {
+                  execSync(`${TMUX_PATH} copy-mode -t "${tmuxSession}"`, { stdio: "pipe" });
+                  inCopyMode = true;
+                }
+                // Scroll up N lines in copy mode
+                for (let i = 0; i < lines; i++) {
+                  execSync(`${TMUX_PATH} send-keys -t "${tmuxSession}" -X scroll-up`, { stdio: "pipe" });
+                }
+              } else if (parsed.direction === "down") {
+                if (inCopyMode) {
+                  for (let i = 0; i < lines; i++) {
+                    execSync(`${TMUX_PATH} send-keys -t "${tmuxSession}" -X scroll-down`, { stdio: "pipe" });
+                  }
+                }
+              }
+            } catch {
+              inCopyMode = false; // copy mode may have exited
+            }
+            return;
+          }
         } catch {
           // Not JSON — regular input
+        }
+
+        // Any regular keypress exits copy mode tracking
+        if (inCopyMode) {
+          // If user types something, cancel copy mode so they can interact normally
+          try {
+            execSync(`${TMUX_PATH} send-keys -t "${tmuxSession}" -X cancel`, { stdio: "pipe" });
+          } catch { /* may not be in copy mode */ }
+          inCopyMode = false;
         }
 
         // Map special characters to tmux key names, send the rest literally
