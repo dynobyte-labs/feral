@@ -269,7 +269,7 @@
         ? 'Worker active \u2014 tmux session: ' + tmuxSession
         : 'No active worker \u2014 start one first';
 
-      currentLocalCmd = hasWorker ? 'tmux attach-session -t ' + tmuxSession : '';
+      currentLocalCmd = hasWorker ? '/opt/homebrew/bin/tmux attach-session -t ' + tmuxSession : '';
       localPreview.textContent = currentLocalCmd || 'No active worker';
       localPreview.style.color = currentLocalCmd ? 'var(--green)' : 'var(--text2)';
 
