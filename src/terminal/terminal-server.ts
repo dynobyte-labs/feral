@@ -193,7 +193,19 @@ export function attachTerminalServer(
         } catch { /* ignore */ }
       }
 
-      // Send initial screen content
+      // Send scrollback history first so user can scroll up in xterm.js
+      try {
+        const scrollback = execSync(
+          `${TMUX_PATH} capture-pane -t "${tmuxSession}" -p -e -S -`,
+          { encoding: "utf-8", maxBuffer: 5 * 1024 * 1024 },
+        );
+        if (scrollback) {
+          // Send scrollback as plain text (not positioned) so it enters xterm scrollback buffer
+          ws.send(scrollback);
+        }
+      } catch { /* ignore */ }
+
+      // Then send the current visible screen positioned properly
       try {
         const initial = execSync(
           `${TMUX_PATH} capture-pane -t "${tmuxSession}" -p -e`,
@@ -263,8 +275,13 @@ export function attachTerminalServer(
           "\x1b[B": "Down",
           "\x1b[C": "Right",
           "\x1b[D": "Left",
+          "\x1b[5~": "PageUp",
+          "\x1b[6~": "PageDown",
+          "\x1b[H": "Home",
+          "\x1b[F": "End",
           "\x1b": "Escape",
           "\t": "Tab",
+          "\x02": "C-b",   // tmux prefix — enables scroll mode (Ctrl-B then [)
           "\x03": "C-c",
           "\x04": "C-d",
           "\x1a": "C-z",
