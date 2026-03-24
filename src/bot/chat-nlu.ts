@@ -201,6 +201,32 @@ export interface NluResult {
   reply: string;
 }
 
+// ---------------------------------------------------------------------------
+// Conversation history — keeps the last N exchanges per channel for context
+// ---------------------------------------------------------------------------
+
+const MAX_HISTORY = 10; // keep last 10 message pairs per channel
+const conversationHistory: Map<string, Anthropic.MessageParam[]> = new Map();
+
+/** Get the message history for a channel, or create a new empty one. */
+function getHistory(channelId: string): Anthropic.MessageParam[] {
+  if (!conversationHistory.has(channelId)) {
+    conversationHistory.set(channelId, []);
+  }
+  return conversationHistory.get(channelId)!;
+}
+
+/** Append a user message and assistant response to the channel history. */
+function pushHistory(channelId: string, userMsg: string, assistantMsg: string): void {
+  const history = getHistory(channelId);
+  history.push({ role: "user", content: userMsg });
+  history.push({ role: "assistant", content: assistantMsg });
+  // Trim to keep only the last N exchanges (N*2 messages)
+  while (history.length > MAX_HISTORY * 2) {
+    history.shift();
+  }
+}
+
 /**
  * Parse a natural language message into a feral action using Claude.
  */
@@ -211,6 +237,8 @@ export async function parseIntent(
     currentProject?: string;
     /** Brief summary of current state for context */
     stateContext?: string;
+    /** Channel/thread ID for maintaining conversation history */
+    channelId?: string;
   }
 ): Promise<NluResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -234,13 +262,20 @@ export async function parseIntent(
     userMsg = `[Current state: ${context.stateContext}]\n\n${userMsg}`;
   }
 
+  // Build messages array with conversation history
+  const history = context?.channelId ? getHistory(context.channelId) : [];
+  const messages: Anthropic.MessageParam[] = [
+    ...history,
+    { role: "user", content: userMsg },
+  ];
+
   try {
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 500,
       system: SYSTEM_PROMPT,
       tools: FERAL_TOOLS,
-      messages: [{ role: "user", content: userMsg }],
+      messages,
     });
 
     // Extract tool use and text from the response
@@ -257,11 +292,17 @@ export async function parseIntent(
       }
     }
 
+    // Save to conversation history
+    if (context?.channelId) {
+      const assistantText = reply || (action ? `[action: ${action}]` : "");
+      if (assistantText) {
+        pushHistory(context.channelId, userMsg, assistantText);
+      }
+    }
+
     return { action, params, reply };
   } catch (err) {
     logger.error(`NLU parse failed: ${err}`);
-    // Return empty reply so project channels fall through to worker routing
-    // rather than showing an error message
     return {
       action: null,
       params: {},

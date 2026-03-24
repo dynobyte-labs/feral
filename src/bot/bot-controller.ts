@@ -266,6 +266,7 @@ export class BotController {
   async handleNaturalLanguage(
     text: string,
     onCreateChannel?: (projectId: string) => Promise<string | null>,
+    channelId?: string,
   ): Promise<string | null> {
     // Quick keyword matching
     if (/^help$/i.test(text)) return this.getHelpText();
@@ -280,7 +281,7 @@ export class BotController {
       const activeWorkers = this.workerManager.listActive();
       const stateContext = `${projects.length} projects (${activeWorkers.length} active workers): ${projects.map(p => `${p.name} [${p.status}]`).join(", ") || "none"}`;
 
-      const nlu = await parseIntent(text, { stateContext });
+      const nlu = await parseIntent(text, { stateContext, channelId });
 
       if (nlu.action) {
         const result = await this.executeAction(nlu.action, nlu.params, onCreateChannel);

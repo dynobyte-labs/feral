@@ -420,7 +420,7 @@ export class SlackBot {
 
       // @mention from anywhere: NLU
       if (isMention) {
-        const response = await this.ctrl.handleNaturalLanguage(text, createChannel);
+        const response = await this.ctrl.handleNaturalLanguage(text, createChannel, message.channel);
         if (response) await say(response);
         return;
       }
@@ -435,7 +435,7 @@ export class SlackBot {
 
       // Non-project channel, not a mention: NLU if available
       if (isNluAvailable()) {
-        const response = await this.ctrl.handleNaturalLanguage(text, createChannel);
+        const response = await this.ctrl.handleNaturalLanguage(text, createChannel, message.channel);
         if (response) await say(response);
       }
     });
