@@ -111,22 +111,17 @@
       </div>
 
       <button id="launchBtn" class="launch-btn" disabled>
-        Open in Terminal.app
+        Copy tmux attach command
       </button>
+      <p id="launchHint" class="hint" style="text-align:center; margin-bottom: 4px;">Paste into any terminal on the Feral machine</p>
 
-      <div class="section-label">Or connect manually</div>
+      <div class="section-label">Remote access (SSH)</div>
 
-      <div id="localCmd" class="cmd-box">
-        <code id="localCmdText">Select a project above</code>
-        <button class="copy-btn" onclick="copyCmd('localCmdText')">Copy</button>
-      </div>
-      <p class="hint">Run this on the Feral host machine directly.</p>
-
-      <div id="remoteCmd" class="cmd-box" style="margin-top: 12px;">
+      <div id="remoteCmd" class="cmd-box">
         <code id="remoteCmdText">Select a project above</code>
         <button class="copy-btn" onclick="copyCmd('remoteCmdText')">Copy</button>
       </div>
-      <p class="hint">Run this from another machine to connect over SSH. Replace <em>user@feral-host</em> with your actual SSH target (e.g. Tailscale hostname).</p>
+      <p class="hint">Run from your workstation over Tailscale/SSH. Replace <em>user@feral-host</em> with your actual SSH target.</p>
     </div>
   </div>
 
@@ -136,8 +131,9 @@
     const statusRow = document.getElementById('statusRow');
     const statusDot = document.getElementById('statusDot');
     const statusText = document.getElementById('statusText');
-    const localCmdText = document.getElementById('localCmdText');
+    const launchHint = document.getElementById('launchHint');
     const remoteCmdText = document.getElementById('remoteCmdText');
+    let currentTmuxCmd = '';
 
     let projects = [];
 
@@ -168,8 +164,8 @@
     function selectProject(name) {
       if (!name) {
         launchBtn.disabled = true;
+        currentTmuxCmd = '';
         statusRow.style.display = 'none';
-        localCmdText.textContent = 'Select a project above';
         remoteCmdText.textContent = 'Select a project above';
         return;
       }
@@ -193,7 +189,7 @@
       // Commands
       const localCmd = 'tmux attach-session -t ' + tmuxSession;
       const remoteCmd = 'ssh user@feral-host -t "' + localCmd + '"';
-      localCmdText.textContent = localCmd;
+      currentTmuxCmd = localCmd;
       remoteCmdText.textContent = remoteCmd;
 
       // Launch button
@@ -210,11 +206,22 @@
       });
     }
 
-    // Launch button: download a .command file that opens Terminal.app
+    // Launch button: copy tmux command to clipboard
     launchBtn.addEventListener('click', () => {
-      const name = projectSelect.value;
-      if (!name) return;
-      window.location.href = '/api/terminal-launch?project=' + encodeURIComponent(name);
+      if (!currentTmuxCmd) return;
+      navigator.clipboard.writeText(currentTmuxCmd).then(() => {
+        const orig = launchBtn.textContent;
+        launchBtn.textContent = 'Copied! Paste into your terminal';
+        launchHint.textContent = currentTmuxCmd;
+        launchHint.style.color = 'var(--green)';
+        launchHint.style.fontFamily = "'SF Mono', monospace";
+        setTimeout(() => {
+          launchBtn.textContent = orig;
+          launchHint.textContent = 'Paste into any terminal on the Feral machine';
+          launchHint.style.color = '';
+          launchHint.style.fontFamily = '';
+        }, 3000);
+      });
     });
 
     projectSelect.addEventListener('change', (e) => selectProject(e.target.value));
