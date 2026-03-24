@@ -122,6 +122,66 @@ export function createRouter(
     }
   });
 
+  // ---- Terminal launcher (.command file for macOS Terminal.app) ----
+
+  router.get("/api/terminal-launch", (req: Request, res: Response) => {
+    try {
+      const projectName = req.query.project as string;
+      if (!projectName) return res.status(400).json({ error: "Missing ?project= parameter" });
+
+      const project = projectManager.getByName(projectName);
+      if (!project) return res.status(404).json({ error: `Project "${projectName}" not found` });
+
+      const tmuxSession = `feral-${project.name}`;
+
+      // Generate a .command file — macOS opens these in Terminal.app automatically
+      const script = [
+        "#!/bin/bash",
+        '# Feral terminal launcher — auto-generated',
+        `# Project: ${project.name}`,
+        "",
+        `TMUX_SESSION="${tmuxSession}"`,
+        "",
+        "# Find tmux (Homebrew or system)",
+        'TMUX_BIN=""',
+        'for p in /opt/homebrew/bin/tmux /usr/local/bin/tmux /usr/bin/tmux; do',
+        '  if [ -x "$p" ]; then TMUX_BIN="$p"; break; fi',
+        "done",
+        "",
+        'if [ -z "$TMUX_BIN" ]; then',
+        '  echo "Error: tmux not found. Install it with: brew install tmux"',
+        '  echo "Press any key to close..."',
+        "  read -n1",
+        "  exit 1",
+        "fi",
+        "",
+        '# Check if session exists',
+        'if ! "$TMUX_BIN" has-session -t "$TMUX_SESSION" 2>/dev/null; then',
+        `  echo "No active tmux session '$TMUX_SESSION'."`,
+        '  echo "Start a worker for this project first."',
+        '  echo ""',
+        '  echo "Press any key to close..."',
+        "  read -n1",
+        "  exit 1",
+        "fi",
+        "",
+        '# Attach to the session',
+        'echo "Attaching to $TMUX_SESSION..."',
+        '"$TMUX_BIN" attach-session -t "$TMUX_SESSION"',
+        "",
+      ].join("\n");
+
+      const filename = `feral-terminal-${project.name}.command`;
+      res.setHeader("Content-Type", "application/octet-stream");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      // .command files need to be executable
+      res.send(script);
+    } catch (err: any) {
+      logger.error(`GET /api/terminal-launch failed: ${err}`);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ---- Health ----
 
   router.get("/api/health", (_req: Request, res: Response) => {

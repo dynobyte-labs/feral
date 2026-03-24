@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Feral — Terminal</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
 <style>
   *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -20,7 +19,6 @@
     background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column;
   }
 
-  /* Top bar */
   .topbar {
     background: var(--surface); border-bottom: 1px solid var(--border);
     padding: 10px 20px; display: flex; align-items: center; gap: 16px;
@@ -30,290 +28,197 @@
   .topbar a:hover { text-decoration: underline; }
   .logo { font-size: 18px; font-weight: 700; color: var(--accent); }
   .logo span { color: var(--text); font-weight: 400; }
-  .sep { color: var(--muted); }
-  .project-name { font-weight: 600; font-size: 15px; }
 
-  .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
-  .status-badge {
-    padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
-    text-transform: uppercase; letter-spacing: 0.5px;
+  .content {
+    flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px;
   }
-  .status-badge.connected { background: rgba(52,211,153,0.12); color: var(--green); }
-  .status-badge.disconnected { background: rgba(248,113,113,0.12); color: var(--red); }
-  .status-badge.connecting { background: rgba(245,158,11,0.12); color: var(--orange); }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 40px; max-width: 640px; width: 100%;
+  }
+
+  h2 { font-size: 20px; margin-bottom: 8px; }
+  .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 28px; line-height: 1.5; }
 
   select {
-    background: var(--surface2); color: var(--text); border: 1px solid var(--border);
-    border-radius: var(--radius-sm); padding: 6px 12px; font-size: 13px;
-    cursor: pointer; outline: none;
+    width: 100%; background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 10px 14px; font-size: 14px;
+    cursor: pointer; outline: none; margin-bottom: 24px;
   }
   select:hover { border-color: var(--accent); }
 
-  /* Terminal container */
-  .terminal-wrap {
-    flex: 1; padding: 8px; overflow: hidden;
+  .launch-btn {
+    display: block; width: 100%; padding: 14px; border-radius: var(--radius-sm);
+    border: none; font-size: 15px; font-weight: 600; cursor: pointer;
+    background: var(--accent); color: white; margin-bottom: 12px;
+    transition: opacity 0.15s;
   }
-  #terminal { height: 100%; }
+  .launch-btn:hover { opacity: 0.85; }
+  .launch-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-  /* Error overlay */
-  .error-overlay {
-    display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 32px 40px; text-align: center; max-width: 480px;
+  .section-label {
+    color: var(--muted); font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.8px; margin: 24px 0 10px; font-weight: 600;
   }
-  .error-overlay.visible { display: block; }
-  .error-overlay h3 { font-size: 16px; margin-bottom: 8px; }
-  .error-overlay p { color: var(--muted); font-size: 13px; line-height: 1.5; }
-  .error-overlay button {
-    margin-top: 16px; padding: 8px 20px; border-radius: var(--radius-sm);
-    border: 1px solid var(--accent); background: rgba(108,124,255,0.12);
-    color: var(--accent); font-size: 13px; cursor: pointer;
+
+  .cmd-box {
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 12px 16px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px;
+    color: var(--green); display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 8px; word-break: break-all;
   }
-  .error-overlay button:hover { background: rgba(108,124,255,0.2); }
+  .cmd-box code { flex: 1; }
+  .copy-btn {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 4px;
+    padding: 4px 10px; color: var(--text2); font-size: 11px; cursor: pointer;
+    white-space: nowrap; flex-shrink: 0;
+  }
+  .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .hint { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 6px; }
+
+  .status-row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 20px;
+    padding: 10px 14px; background: var(--surface2); border-radius: var(--radius-sm);
+    font-size: 13px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot.active { background: var(--green); }
+  .dot.inactive { background: var(--muted); }
 </style>
 </head>
 <body>
   <div class="topbar">
-    <a href="/">← Dashboard</a>
-    <span class="sep">|</span>
+    <a href="/">&#8592; Dashboard</a>
+    <span style="color: var(--muted);">|</span>
     <span class="logo">feral<span> terminal</span></span>
-    <span class="sep">|</span>
-    <select id="projectSelect"><option value="">Loading projects...</option></select>
-    <div class="topbar-right">
-      <button id="scrollUpBtn" style="background:#333;color:#ccc;border:1px solid #555;border-radius:3px;padding:2px 8px;cursor:pointer;font-size:11px;" title="Scroll up (tmux copy-mode)">▲ Scroll Up</button>
-      <button id="scrollDownBtn" style="background:#333;color:#ccc;border:1px solid #555;border-radius:3px;padding:2px 8px;cursor:pointer;font-size:11px;" title="Scroll down">▼ Scroll Down</button>
-      <span style="color: var(--muted); font-size: 11px;">Type to exit scroll mode</span>
-      <span class="sep">|</span>
-      <span id="statusBadge" class="status-badge connecting">Connecting</span>
+  </div>
+
+  <div class="content">
+    <div class="card">
+      <h2>Open Terminal Session</h2>
+      <p class="subtitle">
+        Launch a native terminal window pre-attached to a Feral worker's tmux session.
+        Full scrollback, mouse support, and native performance.
+      </p>
+
+      <select id="projectSelect"><option value="">Loading projects...</option></select>
+
+      <div id="statusRow" class="status-row" style="display:none;">
+        <span id="statusDot" class="dot inactive"></span>
+        <span id="statusText">No active session</span>
+      </div>
+
+      <button id="launchBtn" class="launch-btn" disabled>
+        Open in Terminal.app
+      </button>
+
+      <div class="section-label">Or connect manually</div>
+
+      <div id="localCmd" class="cmd-box">
+        <code id="localCmdText">Select a project above</code>
+        <button class="copy-btn" onclick="copyCmd('localCmdText')">Copy</button>
+      </div>
+      <p class="hint">Run this on the Feral host machine directly.</p>
+
+      <div id="remoteCmd" class="cmd-box" style="margin-top: 12px;">
+        <code id="remoteCmdText">Select a project above</code>
+        <button class="copy-btn" onclick="copyCmd('remoteCmdText')">Copy</button>
+      </div>
+      <p class="hint">Run this from another machine to connect over SSH. Replace <em>user@feral-host</em> with your actual SSH target (e.g. Tailscale hostname).</p>
     </div>
   </div>
 
-  <div class="terminal-wrap" style="position: relative;">
-    <div id="terminal"></div>
-    <div id="errorOverlay" class="error-overlay">
-      <h3 id="errorTitle">Not Connected</h3>
-      <p id="errorMessage">Select a project to connect to its terminal.</p>
-      <button onclick="reconnect()">Reconnect</button>
-    </div>
-  </div>
-
-  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"></script>
   <script>
-    const term = new Terminal({
-      theme: {
-        background: '#0b0d14',
-        foreground: '#e4e7f0',
-        cursor: '#6c7cff',
-        cursorAccent: '#0b0d14',
-        selectionBackground: 'rgba(108,124,255,0.3)',
-        black: '#1c2130',
-        red: '#f87171',
-        green: '#34d399',
-        yellow: '#f59e0b',
-        blue: '#6c7cff',
-        magenta: '#a78bfa',
-        cyan: '#22d3ee',
-        white: '#e4e7f0',
-        brightBlack: '#7b82a0',
-        brightRed: '#fca5a5',
-        brightGreen: '#6ee7b7',
-        brightYellow: '#fcd34d',
-        brightBlue: '#93a3ff',
-        brightMagenta: '#c4b5fd',
-        brightCyan: '#67e8f9',
-        brightWhite: '#f8fafc',
-      },
-      fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', 'Menlo', monospace",
-      fontSize: 13,
-      lineHeight: 1.2,
-      cursorBlink: true,
-      cursorStyle: 'bar',
-      scrollback: 0, // Scrollback handled by tmux copy-mode via wheel events
-    });
-
-    const fitAddon = new FitAddon.FitAddon();
-    const webLinksAddon = new WebLinksAddon.WebLinksAddon();
-    term.loadAddon(fitAddon);
-    term.loadAddon(webLinksAddon);
-    term.open(document.getElementById('terminal'));
-    fitAddon.fit();
-
-    let ws = null;
-    let currentProject = null;
-
-    // Helper: send scroll command to server (tmux copy-mode)
-    function sendScroll(direction, lines) {
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        console.warn('[scroll] ws not open, state:', ws ? ws.readyState : 'null');
-        return;
-      }
-      console.log('[scroll] sending:', direction, lines);
-      ws.send(JSON.stringify({ type: 'scroll', direction, lines }));
-    }
-
-    // Scroll buttons (guaranteed to work)
-    document.getElementById('scrollUpBtn').addEventListener('click', () => sendScroll('up', 5));
-    document.getElementById('scrollDownBtn').addEventListener('click', () => sendScroll('down', 5));
-
-    // Also try intercepting wheel events at document capture phase
-    const termContainer = document.getElementById('terminal');
-    document.addEventListener('wheel', (e) => {
-      console.log('[wheel] target:', e.target.tagName, e.target.className);
-      if (!termContainer.contains(e.target)) {
-        console.log('[wheel] outside terminal, ignoring');
-        return;
-      }
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation();
-      const direction = e.deltaY < 0 ? 'up' : 'down';
-      const lines = Math.max(1, Math.round(Math.abs(e.deltaY) / 30));
-      sendScroll(direction, Math.min(lines, 10));
-    }, { capture: true, passive: false });
-
-    const statusBadge = document.getElementById('statusBadge');
-    const errorOverlay = document.getElementById('errorOverlay');
-    const errorTitle = document.getElementById('errorTitle');
-    const errorMessage = document.getElementById('errorMessage');
     const projectSelect = document.getElementById('projectSelect');
+    const launchBtn = document.getElementById('launchBtn');
+    const statusRow = document.getElementById('statusRow');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const localCmdText = document.getElementById('localCmdText');
+    const remoteCmdText = document.getElementById('remoteCmdText');
 
-    function setStatus(status) {
-      statusBadge.className = `status-badge ${status}`;
-      statusBadge.textContent = status === 'connected' ? 'Connected'
-        : status === 'connecting' ? 'Connecting...'
-        : 'Disconnected';
-    }
+    let projects = [];
 
-    function showError(title, message) {
-      errorTitle.textContent = title;
-      errorMessage.textContent = message;
-      errorOverlay.classList.add('visible');
-    }
-
-    function hideError() {
-      errorOverlay.classList.remove('visible');
-    }
-
-    // Load project list
     async function loadProjects() {
       try {
         const res = await fetch('/api/projects');
-        const projects = await res.json();
-
+        projects = await res.json();
         projectSelect.innerHTML = '<option value="">Select a project...</option>';
         for (const p of projects) {
           const opt = document.createElement('option');
           opt.value = p.name;
-          const status = p.activeWorker ? '● ' : '○ ';
+          const status = p.activeWorker ? '\u25cf ' : '\u25cb ';
           opt.textContent = status + p.name;
           projectSelect.appendChild(opt);
         }
-
         // Auto-select from URL param
         const params = new URLSearchParams(window.location.search);
-        const projectFromUrl = params.get('project');
-        if (projectFromUrl) {
-          projectSelect.value = projectFromUrl;
-          connect(projectFromUrl);
+        const fromUrl = params.get('project');
+        if (fromUrl) {
+          projectSelect.value = fromUrl;
+          selectProject(fromUrl);
         }
       } catch (err) {
         console.error('Failed to load projects:', err);
       }
     }
 
-    function connect(projectName) {
-      if (ws) {
-        ws.close();
-        ws = null;
-      }
-
-      if (!projectName) {
-        setStatus('disconnected');
-        showError('No Project Selected', 'Select a project from the dropdown to connect to its terminal.');
+    function selectProject(name) {
+      if (!name) {
+        launchBtn.disabled = true;
+        statusRow.style.display = 'none';
+        localCmdText.textContent = 'Select a project above';
+        remoteCmdText.textContent = 'Select a project above';
         return;
       }
 
-      currentProject = projectName;
-      term.clear();
-      setStatus('connecting');
-      hideError();
+      const tmuxSession = 'feral-' + name;
+      const project = projects.find(p => p.name === name);
+      const hasWorker = project && project.activeWorker;
 
       // Update URL
       const url = new URL(window.location);
-      url.searchParams.set('project', projectName);
+      url.searchParams.set('project', name);
       history.replaceState(null, '', url);
 
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      ws = new WebSocket(`${protocol}//${window.location.host}/ws/terminal?project=${encodeURIComponent(projectName)}`);
+      // Status
+      statusRow.style.display = 'flex';
+      statusDot.className = 'dot ' + (hasWorker ? 'active' : 'inactive');
+      statusText.textContent = hasWorker
+        ? 'Worker active \u2014 tmux session: ' + tmuxSession
+        : 'No active worker \u2014 start one first';
 
-      ws.onopen = () => {
-        setStatus('connected');
-        hideError();
-        term.focus();
+      // Commands
+      const localCmd = 'tmux attach-session -t ' + tmuxSession;
+      const remoteCmd = 'ssh user@feral-host -t "' + localCmd + '"';
+      localCmdText.textContent = localCmd;
+      remoteCmdText.textContent = remoteCmd;
 
-        // Send initial size
-        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-      };
-
-      ws.onmessage = (event) => {
-        // Check for JSON error messages
-        if (typeof event.data === 'string' && event.data.startsWith('{')) {
-          try {
-            const msg = JSON.parse(event.data);
-            if (msg.error) {
-              setStatus('disconnected');
-              showError('Connection Failed', msg.error);
-              return;
-            }
-          } catch {
-            // Not JSON — terminal data
-          }
-        }
-        term.write(event.data);
-      };
-
-      ws.onclose = () => {
-        setStatus('disconnected');
-      };
-
-      ws.onerror = (err) => {
-        setStatus('disconnected');
-        showError('Connection Error', 'Could not connect to the terminal server. Is Feral running?');
-      };
+      // Launch button
+      launchBtn.disabled = !hasWorker;
     }
 
-    function reconnect() {
-      if (currentProject) {
-        connect(currentProject);
-      }
+    function copyCmd(elementId) {
+      const text = document.getElementById(elementId).textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById(elementId).parentElement.querySelector('.copy-btn');
+        const orig = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = orig, 1500);
+      });
     }
 
-    // Input handling
-    term.onData((data) => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
-      }
+    // Launch button: download a .command file that opens Terminal.app
+    launchBtn.addEventListener('click', () => {
+      const name = projectSelect.value;
+      if (!name) return;
+      window.location.href = '/api/terminal-launch?project=' + encodeURIComponent(name);
     });
 
-    // Resize handling
-    window.addEventListener('resize', () => {
-      fitAddon.fit();
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-      }
-    });
-
-    // Project selector
-    projectSelect.addEventListener('change', (e) => {
-      connect(e.target.value);
-    });
-
-    // Init
+    projectSelect.addEventListener('change', (e) => selectProject(e.target.value));
     loadProjects();
-    showError('No Project Selected', 'Select a project from the dropdown to connect to its terminal.');
-    setStatus('disconnected');
   </script>
 </body>
 </html>
