@@ -80,7 +80,9 @@
     <span class="sep">|</span>
     <select id="projectSelect"><option value="">Loading projects...</option></select>
     <div class="topbar-right">
-      <span style="color: var(--muted); font-size: 11px;">Scroll: mouse wheel · Type anything to exit scroll mode</span>
+      <button id="scrollUpBtn" style="background:#333;color:#ccc;border:1px solid #555;border-radius:3px;padding:2px 8px;cursor:pointer;font-size:11px;" title="Scroll up (tmux copy-mode)">▲ Scroll Up</button>
+      <button id="scrollDownBtn" style="background:#333;color:#ccc;border:1px solid #555;border-radius:3px;padding:2px 8px;cursor:pointer;font-size:11px;" title="Scroll down">▼ Scroll Down</button>
+      <span style="color: var(--muted); font-size: 11px;">Type to exit scroll mode</span>
       <span class="sep">|</span>
       <span id="statusBadge" class="status-badge connecting">Connecting</span>
     </div>
@@ -141,20 +143,34 @@
     let ws = null;
     let currentProject = null;
 
-    // Intercept mouse wheel at DOCUMENT level in capture phase — this fires
-    // before any element-level listener including xterm.js's internal handlers.
-    // Without this, xterm.js converts wheel events to arrow key sequences.
-    // IMPORTANT: must be declared AFTER `let ws` above so the closure can access it.
+    // Helper: send scroll command to server (tmux copy-mode)
+    function sendScroll(direction, lines) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        console.warn('[scroll] ws not open, state:', ws ? ws.readyState : 'null');
+        return;
+      }
+      console.log('[scroll] sending:', direction, lines);
+      ws.send(JSON.stringify({ type: 'scroll', direction, lines }));
+    }
+
+    // Scroll buttons (guaranteed to work)
+    document.getElementById('scrollUpBtn').addEventListener('click', () => sendScroll('up', 5));
+    document.getElementById('scrollDownBtn').addEventListener('click', () => sendScroll('down', 5));
+
+    // Also try intercepting wheel events at document capture phase
     const termContainer = document.getElementById('terminal');
     document.addEventListener('wheel', (e) => {
-      if (!termContainer.contains(e.target)) return; // only intercept inside terminal
+      console.log('[wheel] target:', e.target.tagName, e.target.className);
+      if (!termContainer.contains(e.target)) {
+        console.log('[wheel] outside terminal, ignoring');
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
       const direction = e.deltaY < 0 ? 'up' : 'down';
       const lines = Math.max(1, Math.round(Math.abs(e.deltaY) / 30));
-      ws.send(JSON.stringify({ type: 'scroll', direction, lines: Math.min(lines, 10) }));
+      sendScroll(direction, Math.min(lines, 10));
     }, { capture: true, passive: false });
 
     const statusBadge = document.getElementById('statusBadge');
