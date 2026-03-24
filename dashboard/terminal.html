@@ -41,42 +41,42 @@
   h2 { font-size: 20px; margin-bottom: 8px; }
   .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 28px; line-height: 1.5; }
 
-  select {
+  select, input[type="text"] {
     width: 100%; background: var(--surface2); color: var(--text); border: 1px solid var(--border);
     border-radius: var(--radius-sm); padding: 10px 14px; font-size: 14px;
-    cursor: pointer; outline: none; margin-bottom: 24px;
+    outline: none;
   }
-  select:hover { border-color: var(--accent); }
+  select { cursor: pointer; margin-bottom: 16px; }
+  select:hover, input[type="text"]:hover { border-color: var(--accent); }
+  input[type="text"]:focus { border-color: var(--accent); }
+
+  .ssh-row {
+    display: flex; gap: 8px; margin-bottom: 24px; align-items: center;
+  }
+  .ssh-row input { flex: 1; margin: 0; }
+  .ssh-row .save-btn {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 10px 14px; color: var(--text2); font-size: 13px; cursor: pointer; white-space: nowrap;
+  }
+  .ssh-row .save-btn:hover { border-color: var(--accent); color: var(--accent); }
 
   .launch-btn {
     display: block; width: 100%; padding: 14px; border-radius: var(--radius-sm);
     border: none; font-size: 15px; font-weight: 600; cursor: pointer;
-    background: var(--accent); color: white; margin-bottom: 12px;
+    background: var(--accent); color: white; margin-bottom: 8px;
     transition: opacity 0.15s;
   }
   .launch-btn:hover { opacity: 0.85; }
   .launch-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-  .section-label {
-    color: var(--muted); font-size: 11px; text-transform: uppercase;
-    letter-spacing: 0.8px; margin: 24px 0 10px; font-weight: 600;
-  }
-
-  .cmd-box {
+  .cmd-preview {
     background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm);
     padding: 12px 16px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px;
-    color: var(--green); display: flex; align-items: center; justify-content: space-between;
-    gap: 12px; margin-bottom: 8px; word-break: break-all;
+    color: var(--green); word-break: break-all; margin-bottom: 6px; min-height: 40px;
+    display: flex; align-items: center;
   }
-  .cmd-box code { flex: 1; }
-  .copy-btn {
-    background: var(--surface2); border: 1px solid var(--border); border-radius: 4px;
-    padding: 4px 10px; color: var(--text2); font-size: 11px; cursor: pointer;
-    white-space: nowrap; flex-shrink: 0;
-  }
-  .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
 
-  .hint { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 6px; }
+  .hint { color: var(--muted); font-size: 12px; line-height: 1.5; }
 
   .status-row {
     display: flex; align-items: center; gap: 8px; margin-bottom: 20px;
@@ -86,6 +86,21 @@
   .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .dot.active { background: var(--green); }
   .dot.inactive { background: var(--muted); }
+
+  .section-label {
+    color: var(--muted); font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.8px; margin: 20px 0 8px; font-weight: 600;
+  }
+
+  .setup-note {
+    background: rgba(108,124,255,0.08); border: 1px solid rgba(108,124,255,0.2);
+    border-radius: var(--radius-sm); padding: 12px 16px; font-size: 13px;
+    color: var(--text2); line-height: 1.5; margin-bottom: 20px;
+  }
+  .setup-note code {
+    background: var(--bg); padding: 2px 6px; border-radius: 3px; font-size: 12px;
+    font-family: 'SF Mono', monospace;
+  }
 </style>
 </head>
 <body>
@@ -97,11 +112,19 @@
 
   <div class="content">
     <div class="card">
-      <h2>Open Terminal Session</h2>
+      <h2>Connect to Terminal</h2>
       <p class="subtitle">
-        Launch a native terminal window pre-attached to a Feral worker's tmux session.
-        Full scrollback, mouse support, and native performance.
+        Copy an SSH command to attach to a worker's tmux session from your workstation.
       </p>
+
+      <div id="setupNote" class="setup-note" style="display:none;">
+        Set <code>SSH_HOST</code> in your <code>.env</code> file (e.g. <code>SSH_HOST=paul@100.x.y.z</code>) to skip this step next time.
+      </div>
+
+      <label style="color: var(--muted); font-size: 12px; display: block; margin-bottom: 6px;">SSH target (user@host)</label>
+      <div class="ssh-row">
+        <input type="text" id="sshHostInput" placeholder="e.g. paul@100.64.0.1 or paul@my-mac">
+      </div>
 
       <select id="projectSelect"><option value="">Loading projects...</option></select>
 
@@ -110,32 +133,94 @@
         <span id="statusText">No active session</span>
       </div>
 
+      <div id="cmdPreview" class="cmd-preview" style="display:none;"></div>
+
       <button id="launchBtn" class="launch-btn" disabled>
-        Copy tmux attach command
+        Copy SSH command
       </button>
-      <p id="launchHint" class="hint" style="text-align:center; margin-bottom: 4px;">Paste into any terminal on the Feral machine</p>
+      <p id="launchHint" class="hint" style="text-align:center;">Select a project and enter your SSH target</p>
 
-      <div class="section-label">Remote access (SSH)</div>
-
-      <div id="remoteCmd" class="cmd-box">
-        <code id="remoteCmdText">Select a project above</code>
-        <button class="copy-btn" onclick="copyCmd('remoteCmdText')">Copy</button>
-      </div>
-      <p class="hint">Run from your workstation over Tailscale/SSH. Replace <em>user@feral-host</em> with your actual SSH target.</p>
+      <div class="section-label">If you're on the Feral machine directly</div>
+      <div id="localPreview" class="cmd-preview" style="color: var(--text2);">Select a project above</div>
+      <p class="hint" style="margin-top: 4px; cursor: pointer; color: var(--accent);" id="copyLocalBtn">Click to copy</p>
     </div>
   </div>
 
   <script>
     const projectSelect = document.getElementById('projectSelect');
     const launchBtn = document.getElementById('launchBtn');
+    const launchHint = document.getElementById('launchHint');
     const statusRow = document.getElementById('statusRow');
     const statusDot = document.getElementById('statusDot');
     const statusText = document.getElementById('statusText');
-    const launchHint = document.getElementById('launchHint');
-    const remoteCmdText = document.getElementById('remoteCmdText');
-    let currentTmuxCmd = '';
+    const sshHostInput = document.getElementById('sshHostInput');
+    const cmdPreview = document.getElementById('cmdPreview');
+    const localPreview = document.getElementById('localPreview');
+    const copyLocalBtn = document.getElementById('copyLocalBtn');
+    const setupNote = document.getElementById('setupNote');
 
     let projects = [];
+    let serverSshHost = '';
+    let currentLocalCmd = '';
+
+    // Load SSH host from server config, then from cookie as override
+    async function loadSshHost() {
+      try {
+        const res = await fetch('/api/terminal-config');
+        const data = await res.json();
+        serverSshHost = data.sshHost || '';
+      } catch { /* ignore */ }
+
+      // Cookie overrides server config (user can change it in the UI)
+      const saved = document.cookie.split(';').find(c => c.trim().startsWith('feral_ssh_host='));
+      const cookieVal = saved ? decodeURIComponent(saved.split('=')[1].trim()) : '';
+
+      if (cookieVal) {
+        sshHostInput.value = cookieVal;
+      } else if (serverSshHost) {
+        sshHostInput.value = serverSshHost;
+      }
+
+      // Show setup hint if neither is configured
+      if (!serverSshHost) {
+        setupNote.style.display = 'block';
+      }
+    }
+
+    function saveSshHost() {
+      const val = sshHostInput.value.trim();
+      // Save in cookie for 1 year
+      document.cookie = `feral_ssh_host=${encodeURIComponent(val)}; path=/; max-age=31536000`;
+    }
+
+    // Auto-save when user changes the SSH host
+    sshHostInput.addEventListener('change', () => {
+      saveSshHost();
+      updateCommand();
+    });
+    sshHostInput.addEventListener('input', updateCommand);
+
+    function getFullCommand() {
+      const host = sshHostInput.value.trim();
+      if (!host || !currentLocalCmd) return '';
+      return `ssh ${host} -t "${currentLocalCmd}"`;
+    }
+
+    function updateCommand() {
+      const fullCmd = getFullCommand();
+      if (fullCmd && currentLocalCmd) {
+        cmdPreview.style.display = 'flex';
+        cmdPreview.textContent = fullCmd;
+        launchBtn.disabled = false;
+      } else if (currentLocalCmd && !sshHostInput.value.trim()) {
+        cmdPreview.style.display = 'none';
+        launchBtn.disabled = true;
+        launchHint.textContent = 'Enter your SSH target above';
+      } else {
+        cmdPreview.style.display = 'none';
+        launchBtn.disabled = true;
+      }
+    }
 
     async function loadProjects() {
       try {
@@ -149,7 +234,6 @@
           opt.textContent = status + p.name;
           projectSelect.appendChild(opt);
         }
-        // Auto-select from URL param
         const params = new URLSearchParams(window.location.search);
         const fromUrl = params.get('project');
         if (fromUrl) {
@@ -163,10 +247,11 @@
 
     function selectProject(name) {
       if (!name) {
-        launchBtn.disabled = true;
-        currentTmuxCmd = '';
+        currentLocalCmd = '';
         statusRow.style.display = 'none';
-        remoteCmdText.textContent = 'Select a project above';
+        localPreview.textContent = 'Select a project above';
+        localPreview.style.color = 'var(--text2)';
+        updateCommand();
         return;
       }
 
@@ -174,58 +259,60 @@
       const project = projects.find(p => p.name === name);
       const hasWorker = project && project.activeWorker;
 
-      // Update URL
       const url = new URL(window.location);
       url.searchParams.set('project', name);
       history.replaceState(null, '', url);
 
-      // Status
       statusRow.style.display = 'flex';
       statusDot.className = 'dot ' + (hasWorker ? 'active' : 'inactive');
       statusText.textContent = hasWorker
         ? 'Worker active \u2014 tmux session: ' + tmuxSession
         : 'No active worker \u2014 start one first';
 
-      // Commands
-      const localCmd = 'tmux attach-session -t ' + tmuxSession;
-      const remoteCmd = 'ssh user@feral-host -t "' + localCmd + '"';
-      currentTmuxCmd = localCmd;
-      remoteCmdText.textContent = remoteCmd;
+      currentLocalCmd = hasWorker ? 'tmux attach-session -t ' + tmuxSession : '';
+      localPreview.textContent = currentLocalCmd || 'No active worker';
+      localPreview.style.color = currentLocalCmd ? 'var(--green)' : 'var(--text2)';
 
-      // Launch button
-      launchBtn.disabled = !hasWorker;
+      updateCommand();
+
+      if (!hasWorker) {
+        launchBtn.disabled = true;
+        launchHint.textContent = 'Start a worker for this project first';
+      }
     }
 
-    function copyCmd(elementId) {
-      const text = document.getElementById(elementId).textContent;
-      navigator.clipboard.writeText(text).then(() => {
-        const btn = document.getElementById(elementId).parentElement.querySelector('.copy-btn');
-        const orig = btn.textContent;
-        btn.textContent = 'Copied!';
-        setTimeout(() => btn.textContent = orig, 1500);
-      });
+    function flashButton(text, duration) {
+      const orig = launchBtn.textContent;
+      launchBtn.textContent = text;
+      launchBtn.style.background = 'var(--green)';
+      setTimeout(() => {
+        launchBtn.textContent = orig;
+        launchBtn.style.background = '';
+      }, duration || 2000);
     }
 
-    // Launch button: copy tmux command to clipboard
     launchBtn.addEventListener('click', () => {
-      if (!currentTmuxCmd) return;
-      navigator.clipboard.writeText(currentTmuxCmd).then(() => {
-        const orig = launchBtn.textContent;
-        launchBtn.textContent = 'Copied! Paste into your terminal';
-        launchHint.textContent = currentTmuxCmd;
-        launchHint.style.color = 'var(--green)';
-        launchHint.style.fontFamily = "'SF Mono', monospace";
-        setTimeout(() => {
-          launchBtn.textContent = orig;
-          launchHint.textContent = 'Paste into any terminal on the Feral machine';
-          launchHint.style.color = '';
-          launchHint.style.fontFamily = '';
-        }, 3000);
+      const cmd = getFullCommand();
+      if (!cmd) return;
+      saveSshHost();
+      navigator.clipboard.writeText(cmd).then(() => {
+        flashButton('Copied! Paste into your terminal', 2500);
+        launchHint.textContent = 'Paste into any terminal on your workstation';
+      });
+    });
+
+    copyLocalBtn.addEventListener('click', () => {
+      if (!currentLocalCmd) return;
+      navigator.clipboard.writeText(currentLocalCmd).then(() => {
+        copyLocalBtn.textContent = 'Copied!';
+        setTimeout(() => { copyLocalBtn.textContent = 'Click to copy'; }, 1500);
       });
     });
 
     projectSelect.addEventListener('change', (e) => selectProject(e.target.value));
-    loadProjects();
+
+    // Init
+    loadSshHost().then(loadProjects);
   </script>
 </body>
 </html>

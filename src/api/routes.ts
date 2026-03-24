@@ -122,6 +122,12 @@ export function createRouter(
     }
   });
 
+  // ---- Terminal config (SSH host for remote terminal page) ----
+
+  router.get("/api/terminal-config", (_req: Request, res: Response) => {
+    res.json({ sshHost: config.dashboard.sshHost });
+  });
+
   // ---- Terminal launcher (.command file for macOS Terminal.app) ----
 
   router.get("/api/terminal-launch", (req: Request, res: Response) => {

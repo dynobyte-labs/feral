@@ -15,6 +15,7 @@ const envSchema = z.object({
 
   DASHBOARD_TOKEN: z.string().optional(),
   DASHBOARD_URL: z.string().optional(),
+  SSH_HOST: z.string().optional(),  // e.g. "user@100.x.y.z" or "user@my-mac" for remote terminal access
 
   GITHUB_TOKEN: z.string().optional(),
   GITHUB_ORG: z.string().optional(),
@@ -82,6 +83,7 @@ export const config = {
     token: env.DASHBOARD_TOKEN,
     authEnabled: !!env.DASHBOARD_TOKEN,
     url: env.DASHBOARD_URL || `http://${getLocalIp()}:${env.PORT}`,
+    sshHost: env.SSH_HOST || "",
   },
 
   github: {
