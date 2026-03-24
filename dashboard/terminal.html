@@ -138,15 +138,26 @@
     term.open(document.getElementById('terminal'));
     fitAddon.fit();
 
-    // Intercept mouse wheel on the terminal and send scroll commands to tmux
-    const termEl = document.getElementById('terminal');
-    termEl.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      const direction = e.deltaY < 0 ? 'up' : 'down';
-      const lines = Math.max(1, Math.round(Math.abs(e.deltaY) / 30));
-      ws.send(JSON.stringify({ type: 'scroll', direction, lines: Math.min(lines, 10) }));
-    }, { passive: false });
+    // Intercept mouse wheel BEFORE xterm.js sees it (capture phase on its
+    // internal elements). Without this, xterm.js converts wheel events into
+    // arrow key escape sequences that flood tmux input.
+    // We wait a tick for xterm.js to create its internal DOM, then attach.
+    setTimeout(() => {
+      const xtermViewport = document.querySelector('.xterm-viewport');
+      const xtermScreen = document.querySelector('.xterm-screen');
+      const targets = [xtermViewport, xtermScreen, document.getElementById('terminal')].filter(Boolean);
+      targets.forEach(el => {
+        el.addEventListener('wheel', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          const direction = e.deltaY < 0 ? 'up' : 'down';
+          const lines = Math.max(1, Math.round(Math.abs(e.deltaY) / 30));
+          ws.send(JSON.stringify({ type: 'scroll', direction, lines: Math.min(lines, 10) }));
+        }, { capture: true, passive: false });
+      });
+    }, 100);
 
     let ws = null;
     let currentProject = null;
