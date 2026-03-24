@@ -193,9 +193,13 @@ export function attachTerminalServer(
         } catch { /* ignore */ }
       }
 
-      // Send scrollback history as clean plain text into xterm.js's buffer.
-      // We strip all ANSI escape codes so only readable text goes into the
-      // scrollback buffer, then reset the screen before starting positioned polling.
+      // Scrollback strategy: use xterm.js's alternate screen buffer for live polling.
+      // 1. Send scrollback history as clean text into the NORMAL buffer (scrollable)
+      // 2. Switch to ALTERNATE screen buffer (like vim/tmux do)
+      // 3. All positioned polling happens in the alternate buffer
+      // When the user scrolls up in xterm.js, they see the clean scrollback history.
+
+      // Step 1: Send scrollback into normal buffer
       try {
         const rawScrollback = execSync(
           `${TMUX_PATH} capture-pane -t "${tmuxSession}" -p -S -`,
@@ -204,7 +208,6 @@ export function attachTerminalServer(
         if (rawScrollback && rawScrollback.trim()) {
           // Strip all ANSI escape sequences for clean scrollback
           const stripped = rawScrollback.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-          // Send each line with explicit \r\n so xterm.js buffers them properly
           const lines = stripped.split("\n");
           // Trim trailing empty lines
           while (lines.length > 0 && lines[lines.length - 1].trim() === "") {
@@ -216,9 +219,8 @@ export function attachTerminalServer(
         }
       } catch { /* ignore */ }
 
-      // Clear the visible screen area and reset cursor before starting positioned polling.
-      // This separates the scrollback (above) from the live screen (below).
-      ws.send("\x1b[2J\x1b[H");
+      // Step 2: Switch to alternate screen buffer — scrollback stays in normal buffer
+      ws.send("\x1b[?1049h");
 
       // Send the current visible screen positioned properly
       try {
