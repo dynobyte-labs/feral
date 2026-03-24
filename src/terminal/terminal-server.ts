@@ -246,6 +246,7 @@ export function attachTerminalServer(
 
       ws.on("message", (data) => {
         const msg = data.toString();
+        logger.info(`[terminal-msg] received (${msg.length} chars): ${msg.substring(0, 80)}`);
         try {
           const parsed = JSON.parse(msg);
           if (parsed.type === "resize" && parsed.cols && parsed.rows) {
@@ -257,7 +258,7 @@ export function attachTerminalServer(
             return;
           }
           if (parsed.type === "scroll") {
-            logger.debug(`Scroll event: ${parsed.direction} ${parsed.lines} lines (copyMode=${inCopyMode})`);
+            logger.info(`Scroll event: ${parsed.direction} ${parsed.lines} lines (copyMode=${inCopyMode})`);
             try {
               const lines = Math.min(parsed.lines || 3, 20);
               if (parsed.direction === "up") {
