@@ -193,11 +193,32 @@ export function attachTerminalServer(
         } catch { /* ignore */ }
       }
 
-      // NOTE: We intentionally do NOT dump tmux scrollback into xterm.js's buffer.
-      // Mixing raw scrollback text with ANSI-positioned polling updates creates
-      // garbled output when the user scrolls up. Instead, users scroll within tmux
-      // itself using Ctrl-B then [ (tmux copy mode), which works perfectly since
-      // we forward the C-b prefix key.
+      // Send scrollback history as clean plain text into xterm.js's buffer.
+      // We strip all ANSI escape codes so only readable text goes into the
+      // scrollback buffer, then reset the screen before starting positioned polling.
+      try {
+        const rawScrollback = execSync(
+          `${TMUX_PATH} capture-pane -t "${tmuxSession}" -p -S -`,
+          { encoding: "utf-8", maxBuffer: 5 * 1024 * 1024 },
+        );
+        if (rawScrollback && rawScrollback.trim()) {
+          // Strip all ANSI escape sequences for clean scrollback
+          const stripped = rawScrollback.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+          // Send each line with explicit \r\n so xterm.js buffers them properly
+          const lines = stripped.split("\n");
+          // Trim trailing empty lines
+          while (lines.length > 0 && lines[lines.length - 1].trim() === "") {
+            lines.pop();
+          }
+          if (lines.length > 0) {
+            ws.send(lines.join("\r\n") + "\r\n");
+          }
+        }
+      } catch { /* ignore */ }
+
+      // Clear the visible screen area and reset cursor before starting positioned polling.
+      // This separates the scrollback (above) from the live screen (below).
+      ws.send("\x1b[2J\x1b[H");
 
       // Send the current visible screen positioned properly
       try {
