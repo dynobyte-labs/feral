@@ -149,10 +149,10 @@ export class ProjectManager {
     let repoUrl: string | null = null;
     if (config.github.enabled && !options.skipGithub) {
       try {
-        const orgFlag = config.github.org ? `--org ${config.github.org}` : "";
+        const repoName = config.github.org ? `${config.github.org}/${name}` : name;
         const ghEnv = { ...process.env, GH_TOKEN: config.github.token, PATH: `${process.env.PATH}:/opt/homebrew/bin:/usr/local/bin` };
         execSync(
-          `${GH_PATH} repo create ${name} --private ${orgFlag} --source=. --push`,
+          `${GH_PATH} repo create ${repoName} --private --source=. --push`,
           { cwd: projectPath, stdio: "pipe", env: ghEnv }
         );
         const remote = execSync(`${GIT_PATH} remote get-url origin`, {
